@@ -1,0 +1,28 @@
+# LPC LPC11U3x MCU line
+
+# Copyright (c) 2020, Seagate
+# SPDX-License-Identifier: Apache-2.0
+
+choice
+	prompt "LPC LPC11U3X MCU Selection"
+	depends on SOC_SERIES_LPC11U3X
+
+config SOC_LPC11U37
+	bool "SOC_LPC11U37"
+
+endchoice
+
+if SOC_SERIES_LPC11U3X
+
+config SOC_PART_NUMBER_LPC11U37FBD64
+	bool
+
+config SOC_PART_NUMBER_LPC11U3X
+	string
+	default "LPC11U37FBD64" if SOC_PART_NUMBER_LPC11U37FBD64
+
+	help
+	  This string holds the full part number of the SoC. It is a hidden
+	  option that you should not set directly. The part number selection
+	  choice defines the default value for this string.
+endif # SOC_SERIES_LPC11U3X

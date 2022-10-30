@@ -1,0 +1,27 @@
+# LPC11U3X series configuration options
+
+# Copyright (c) 2020, Seagate
+# SPDX-License-Identifier: Apache-2.0
+
+if SOC_SERIES_LPC11U3X
+
+source "soc/arm/nxp_lpc/lpc11u3x/Kconfig.defconfig.lp*"
+
+config SOC_SERIES
+	default "lpc11u3x"
+
+config NUM_IRQS
+	# must be >= the highest interrupt number used
+	default 40
+
+if PINMUX
+
+# The pinmux device must be initialized before all the other devices, including
+# the clock control device which uses it.
+
+config PINMUX_INIT_PRIORITY
+	default 1
+
+endif # PINMUX
+
+endif # SOC_SERIES_LPC11U3X
