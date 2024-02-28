@@ -40,6 +40,7 @@ config FLASH_MCUX_FLEXSPI_NOR
 	depends on DT_HAS_NXP_IMX_FLEXSPI_NOR_ENABLED
 	select FLASH_HAS_PAGE_LAYOUT
 	select FLASH_HAS_DRIVER_ENABLED
+	select FLASH_JESD216
 	select MEMC
 	select MEMC_MCUX_FLEXSPI
 
@@ -99,16 +100,6 @@ config FLASH_MCUX_FLEXSPI_HYPERFLASH_WRITE_BUFFER
 	  Copy the data to a RAM buffer before writing it to the flash.
 	  This prevents faults when the data to write would be located on the
 	  flash itself.
-
-config FLASH_MCUX_FLEXSPI_XIP
-	bool "MCUX FlexSPI flash access with xip"
-	default y
-	depends on MEMC_MCUX_FLEXSPI
-	depends on (CODE_FLEXSPI || CODE_FLEXSPI2 || SOC_SERIES_IMX_RT6XX)
-	select XIP
-	help
-	  Allows using the flash API while running in XIP.
-	  WARNING: It is possible to overwrite the running application itself.
 
 if FLASH_MCUX_FLEXSPI_XIP
 

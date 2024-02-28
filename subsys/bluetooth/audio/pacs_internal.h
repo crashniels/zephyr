@@ -17,11 +17,6 @@ struct bt_pac_codec {
 	uint16_t vid;			/* Vendor specific Codec ID */
 } __packed;
 
-/* TODO: Figure out the capabilities types */
-#define BT_CODEC_CAP_PARAMS		0x01
-#define BT_CODEC_CAP_DRM		0x0a
-#define BT_CODEC_CAP_DRM_VALUE		0x0b
-
 struct bt_pac_ltv {
 	uint8_t  len;
 	uint8_t  type;
@@ -33,20 +28,11 @@ struct bt_pac_ltv_data {
 	struct bt_pac_ltv data[0];
 } __packed;
 
-struct bt_pac {
-	struct bt_pac_codec codec;	/* Codec ID */
-	struct bt_pac_ltv_data cc;	/* Codec Specific Capabilities */
-	struct bt_pac_ltv_data meta;	/* Metadata */
-} __packed;
-
 struct bt_pacs_read_rsp {
 	uint8_t  num_pac;		/* Number of PAC Records*/
-	struct bt_pac pac[0];
 } __packed;
 
 struct bt_pacs_context {
 	uint16_t  snk;
 	uint16_t  src;
 } __packed;
-
-bool bt_pacs_context_available(enum bt_audio_dir dir, uint16_t context);

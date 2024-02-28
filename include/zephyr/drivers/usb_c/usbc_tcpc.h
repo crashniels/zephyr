@@ -24,6 +24,7 @@
 
 #include <zephyr/types.h>
 #include <zephyr/device.h>
+#include <errno.h>
 
 #include "usbc_tc.h"
 #include "usbc_pd.h"
@@ -105,7 +106,7 @@ struct tcpc_chip_info {
 	/** Device Id */
 	uint16_t device_id;
 	/** Firmware version number */
-	uint64_t fw_verion_number;
+	uint64_t fw_version_number;
 
 	union {
 		/** Minimum Required firmware version string */
@@ -115,7 +116,10 @@ struct tcpc_chip_info {
 	};
 };
 
-typedef	int (*tcpc_vconn_control_cb_t)(const struct device *dev, bool enable);
+typedef	int (*tcpc_vconn_control_cb_t)(const struct device *dev,
+		enum tc_cc_polarity pol, bool enable);
+typedef	int (*tcpc_vconn_discharge_cb_t)(const struct device *dev,
+		enum tc_cc_polarity pol, bool enable);
 typedef void (*tcpc_alert_handler_cb_t)(const struct device *dev, void *data,
 		enum tcpc_alert alert);
 
@@ -126,12 +130,13 @@ __subsystem struct tcpc_driver_api {
 	int (*select_rp_value)(const struct device *dev, enum tc_rp_value rp);
 	int (*get_rp_value)(const struct device *dev, enum tc_rp_value *rp);
 	int (*set_cc)(const struct device *dev, enum tc_cc_pull pull);
+	void (*set_vconn_discharge_cb)(const struct device *dev, tcpc_vconn_discharge_cb_t cb);
 	void (*set_vconn_cb)(const struct device *dev, tcpc_vconn_control_cb_t vconn_cb);
+	int (*vconn_discharge)(const struct device *dev, bool enable);
 	int (*set_vconn)(const struct device *dev, bool enable);
 	int (*set_roles)(const struct device *dev, enum tc_power_role power_role,
 			enum tc_data_role data_role);
-	int (*receive_data)(const struct device *dev, struct pd_msg *msg);
-	bool (*is_rx_pending_msg)(const struct device *dev, enum pd_packet_type *type);
+	int (*get_rx_pending_msg)(const struct device *dev, struct pd_msg *msg);
 	int (*set_rx_enable)(const struct device *dev, bool enable);
 	int (*set_cc_polarity)(const struct device *dev, enum tc_cc_polarity polarity);
 	int (*transmit_data)(const struct device *dev, struct pd_msg *msg);
@@ -146,8 +151,8 @@ __subsystem struct tcpc_driver_api {
 	int (*set_debug_accessory)(const struct device *dev, bool enable);
 	int (*set_debug_detach)(const struct device *dev);
 	int (*set_drp_toggle)(const struct device *dev, bool enable);
-	bool (*get_snk_ctrl)(const struct device *dev);
-	bool (*get_src_ctrl)(const struct device *dev);
+	int (*get_snk_ctrl)(const struct device *dev);
+	int (*get_src_ctrl)(const struct device *dev);
 	int (*get_chip_info)(const struct device *dev, struct tcpc_chip_info *chip_info);
 	int (*set_low_power_mode)(const struct device *dev, bool enable);
 	int (*sop_prime_enable)(const struct device *dev, bool enable);
@@ -171,7 +176,7 @@ static inline int tcpc_is_cc_rp(enum tc_cc_voltage_state cc)
 static inline int tcpc_is_cc_open(enum tc_cc_voltage_state cc1,
 				  enum tc_cc_voltage_state cc2)
 {
-	return cc1 == TC_CC_VOLT_OPEN && cc2 == TC_CC_VOLT_OPEN;
+	return (cc1 < TC_CC_VOLT_RD) && (cc2 < TC_CC_VOLT_RD);
 }
 
 /**
@@ -226,6 +231,7 @@ static inline int tcpc_is_cc_only_one_rd(enum tc_cc_voltage_state cc1,
  *
  * @retval 0 on success
  * @retval -EIO on failure
+ * @retval -EAGAIN if initialization should be postponed
  */
 static inline int tcpc_init(const struct device *dev)
 {
@@ -350,6 +356,53 @@ static inline void tcpc_set_vconn_cb(const struct device *dev,
 }
 
 /**
+ * @brief Sets a callback that can enable or discharge VCONN if the TCPC is
+ *	  unable to or the system is configured in a way that does not use
+ *	  the VCONN control capabilities of the TCPC
+ *
+ * The callback is called in the tcpc_vconn_discharge function if cb isn't NULL
+ *
+ * @param dev       Runtime device structure
+ * @param cb  pointer to the callback function that discharges vconn
+ */
+static inline void tcpc_set_vconn_discharge_cb(const struct device *dev,
+				     tcpc_vconn_discharge_cb_t cb)
+{
+	const struct tcpc_driver_api *api =
+		(const struct tcpc_driver_api *)dev->api;
+
+	__ASSERT(api->set_vconn_discharge_cb != NULL,
+		 "Callback pointer should not be NULL");
+
+	return api->set_vconn_discharge_cb(dev, cb);
+}
+
+/**
+ * @brief Discharges VCONN
+ *
+ * This function uses the TCPC to discharge VCONN if possible or calls the
+ * callback function set by tcpc_set_vconn_cb
+ *
+ * @param dev     Runtime device structure
+ * @param enable  VCONN discharge is enabled when true, it's disabled
+ *
+ * @retval 0 on success
+ * @retval -EIO on failure
+ * @retval -ENOSYS if not implemented
+ */
+static inline int tcpc_vconn_discharge(const struct device *dev, bool enable)
+{
+	const struct tcpc_driver_api *api =
+		(const struct tcpc_driver_api *)dev->api;
+
+	if (api->vconn_discharge == NULL) {
+		return -ENOSYS;
+	}
+
+	return api->vconn_discharge(dev, enable);
+}
+
+/**
  * @brief Enables or disables VCONN
  *
  * This function uses the TCPC to measure VCONN if possible or calls the
@@ -402,50 +455,25 @@ static inline int tcpc_set_roles(const struct device *dev,
 }
 
 /**
- * @brief Tests if a received Power Delivery message is pending
+ * @brief Retrieves the Power Delivery message from the TCPC.
+ * If buf is NULL, then only the status is returned, where 0 means there is a message pending and
+ * -ENODATA means there is no pending message.
  *
- * @param dev  Runtime device structure
- * @param type  pointer to where message type is written. Can be NULL
+ * @param dev Runtime device structure
+ * @param buf pointer where the pd_buf pointer is written, NULL if only checking the status
  *
- * @retval true if message is pending, else false
+ * @retval Greater or equal to 0 is the number of bytes received if buf parameter is provided
+ * @retval 0 if there is a message pending and buf parameter is NULL
  * @retval -EIO on failure
- * @retval -ENOSYS if not implemented
+ * @retval -ENODATA if no message is pending
  */
-static inline bool tcpc_is_rx_pending_msg(const struct device *dev,
-					  enum pd_packet_type *type)
+static inline int tcpc_get_rx_pending_msg(const struct device *dev, struct pd_msg *buf)
 {
-	const struct tcpc_driver_api *api =
-		(const struct tcpc_driver_api *)dev->api;
+	const struct tcpc_driver_api *api = (const struct tcpc_driver_api *)dev->api;
 
-	if (api->is_rx_pending_msg == NULL) {
-		return -ENOSYS;
-	}
+	__ASSERT(api->get_rx_pending_msg != NULL, "Callback pointer should not be NULL");
 
-	return api->is_rx_pending_msg(dev, type);
-}
-
-/**
- * @brief Retrieves the Power Delivery message from the TCPC
- *
- * @param dev  Runtime device structure
- * @param buf  pointer where the pd_buf pointer is written
- *
- * @retval Greater or equal to 0 is the number of bytes received
- * @retval -EIO on failure
- * @retval -EFAULT on buf being NULL
- * @retval -ENOSYS if not implemented
- */
-static inline int tcpc_receive_data(const struct device *dev,
-				    struct pd_msg *buf)
-{
-	const struct tcpc_driver_api *api =
-		(const struct tcpc_driver_api *)dev->api;
-
-	if (api->receive_data == NULL) {
-		return -ENOSYS;
-	}
-
-	return api->receive_data(dev, buf);
+	return api->get_rx_pending_msg(dev, buf);
 }
 
 /**
@@ -714,7 +742,7 @@ static inline int tcpc_set_drp_toggle(const struct device *dev, bool enable)
  * @retval false if not sinking power
  * @retval -ENOSYS if not implemented
  */
-static inline bool tcpc_get_snk_ctrl(const struct device *dev)
+static inline int tcpc_get_snk_ctrl(const struct device *dev)
 {
 	const struct tcpc_driver_api *api =
 		(const struct tcpc_driver_api *)dev->api;
@@ -735,7 +763,7 @@ static inline bool tcpc_get_snk_ctrl(const struct device *dev)
  * @retval false if not sourcing power
  * @retval -ENOSYS if not implemented
  */
-static inline bool tcpc_get_src_ctrl(const struct device *dev)
+static inline int tcpc_get_src_ctrl(const struct device *dev)
 {
 	const struct tcpc_driver_api *api =
 		(const struct tcpc_driver_api *)dev->api;

@@ -34,8 +34,6 @@ LOG_MODULE_REGISTER(ws2812_spi);
  *   isn't an EEPROM)
  */
 #define SPI_OPER(idx) (SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | \
-		  COND_CODE_1(DT_INST_PROP(idx, spi_cpol), (SPI_MODE_CPOL), (0)) | \
-		  COND_CODE_1(DT_INST_PROP(idx, spi_cpha), (SPI_MODE_CPHA), (0)) | \
 		  SPI_WORD_SET(SPI_FRAME_BITS))
 
 struct ws2812_spi_cfg {
@@ -167,7 +165,7 @@ static int ws2812_spi_init(const struct device *dev)
 	const struct ws2812_spi_cfg *cfg = dev_cfg(dev);
 	uint8_t i;
 
-	if (!spi_is_ready(&cfg->bus)) {
+	if (!spi_is_ready_dt(&cfg->bus)) {
 		LOG_ERR("SPI device %s not ready", cfg->bus.bus->name);
 		return -ENODEV;
 	}

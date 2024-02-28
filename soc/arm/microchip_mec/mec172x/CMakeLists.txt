@@ -10,10 +10,7 @@ zephyr_sources(
   )
 
 if(CONFIG_PM)
-  zephyr_library_sources(power.c)
-  if(NOT CONFIG_PM_DEVICE)
-    zephyr_library_sources(device_power.c)
-  endif()
+  zephyr_library_sources(power.c device_power.c)
 endif()
 
 if(CONFIG_SOC_HAS_TIMING_FUNCTIONS AND NOT CONFIG_BOARD_HAS_TIMING_FUNCTIONS)
@@ -24,3 +21,5 @@ if(CONFIG_SOC_HAS_TIMING_FUNCTIONS AND NOT CONFIG_BOARD_HAS_TIMING_FUNCTIONS)
     endif()
   endif()
 endif()
+
+set(SOC_LINKER_SCRIPT ${ZEPHYR_BASE}/include/zephyr/arch/arm/cortex_m/scripts/linker.ld CACHE INTERNAL "")

@@ -27,6 +27,7 @@ struct dma_stm32_stream {
 	uint32_t dst_size;
 	void *user_data; /* holds the client data */
 	dma_callback_t dma_callback;
+	bool cyclic;
 };
 
 struct dma_stm32_data {
@@ -81,6 +82,7 @@ void stm32_dma_clear_stream_irq(DMA_TypeDef *dma, uint32_t id);
 bool stm32_dma_is_irq_happened(DMA_TypeDef *dma, uint32_t id);
 bool stm32_dma_is_unexpected_irq_happened(DMA_TypeDef *dma, uint32_t id);
 void stm32_dma_enable_stream(DMA_TypeDef *dma, uint32_t id);
+bool stm32_dma_is_enabled_stream(DMA_TypeDef *dma, uint32_t id);
 int stm32_dma_disable_stream(DMA_TypeDef *dma, uint32_t id);
 
 #if !defined(CONFIG_DMAMUX_STM32)

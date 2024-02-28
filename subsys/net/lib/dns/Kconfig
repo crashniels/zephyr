@@ -4,10 +4,18 @@
 config DNS_RESOLVER
 	bool "DNS resolver"
 	depends on NET_NATIVE
+	select CRC
 	help
 	  This option enables the DNS client side support for Zephyr
 
 if DNS_RESOLVER
+
+config DNS_RESOLVER_AUTO_INIT
+	bool "Automatically initialize the default DNS context"
+	default y
+	help
+	  Automatically initialize the default DNS context so dns_resolve_init
+	  does not need to be manually called.
 
 config MDNS_RESOLVER
 	bool "MDNS support"

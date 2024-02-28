@@ -205,7 +205,7 @@ _west_help() {
 
 _west_completion() {
 
-  _arguments -S "1:shell:(bash zsh)"
+  _arguments -S "1:shell:(bash zsh fish)"
 }
 
 _west_boards() {
@@ -261,6 +261,8 @@ _west_sign() {
 typeset -a -g _west_runner_opts=(
   '(-H --context)'{-H,--context}'[print runner-specific options]'
   '--board-dir[board directory]:board dir:_directories'
+  '(-f --file)'{-f,--file}'[path to binary]:path to binary:_files'
+  '(-t --file-type)'{-t,--file-type}'[type of binary]:type of binary:(hex bin elf)'
   '--elf-file[path to zephyr.elf]:path to zephyr.elf:_files'
   '--hex-file[path to zephyr.hex]:path to zephyr.hex:_files'
   '--bin-file[path to zephyr.bin]:path to zephyr.bin:_files'
@@ -298,7 +300,7 @@ _west_spdx() {
   '(-i --init)'{-i,--init}'[initialize CMake file-based API]'
   '(-d --build-dir)'{-d,--build-dir}'[build directory to create or use]:build dir:_directories'
   '(-n --namespace-prefix)'{-n,--namespace-prefix}'[namespace prefix]:namespace prefix:'
-  '(-s --spdx-dir)'{-d,--spdx-dir}'[SPDX output directory]:spdx output dir:_directories'
+  '(-s --spdx-dir)'{-s,--spdx-dir}'[SPDX output directory]:spdx output dir:_directories'
   '--analyze-includes[also analyze included header files]'
   '--include-sdk[also generate SPDX document for SDK]'
   )

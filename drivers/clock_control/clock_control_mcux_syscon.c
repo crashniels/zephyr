@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-22, NXP
+ * Copyright (c) 2020-23, NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -19,12 +19,19 @@ static int mcux_lpc_syscon_clock_control_on(const struct device *dev,
 			      clock_control_subsys_t sub_system)
 {
 #if defined(CONFIG_CAN_MCUX_MCAN)
-	uint32_t clock_name = (uint32_t)sub_system;
-
-	if (clock_name == MCUX_MCAN_CLK) {
+	if ((uint32_t)sub_system == MCUX_MCAN_CLK) {
 		CLOCK_EnableClock(kCLOCK_Mcan);
 	}
 #endif /* defined(CONFIG_CAN_MCUX_MCAN) */
+#if defined(CONFIG_COUNTER_NXP_MRT)
+	if ((uint32_t)sub_system == MCUX_MRT_CLK) {
+#if defined(CONFIG_SOC_FAMILY_LPC)
+		CLOCK_EnableClock(kCLOCK_Mrt);
+#elif defined(CONFIG_SOC_FAMILY_IMX)
+		CLOCK_EnableClock(kCLOCK_Mrt0);
+#endif
+	}
+#endif /* defined(CONFIG_COUNTER_NXP_MRT) */
 
 	return 0;
 }
@@ -127,7 +134,7 @@ static int mcux_lpc_syscon_clock_control_get_subsys_rate(
 		break;
 #endif /* defined(CONFIG_CAN_MCUX_MCAN) */
 
-#if defined(CONFIG_COUNTER_MCUX_CTIMER)
+#if defined(CONFIG_COUNTER_MCUX_CTIMER) || defined(CONFIG_PWM_MCUX_CTIMER)
 	case (MCUX_CTIMER0_CLK + MCUX_CTIMER_CLK_OFFSET):
 		*rate = CLOCK_GetCTimerClkFreq(0);
 		break;
@@ -145,6 +152,12 @@ static int mcux_lpc_syscon_clock_control_get_subsys_rate(
 		break;
 #endif
 
+#if defined(CONFIG_COUNTER_NXP_MRT)
+	case MCUX_MRT_CLK:
+#endif
+#if defined(CONFIG_PWM_MCUX_SCTIMER)
+	case MCUX_SCTIMER_CLK:
+#endif
 	case MCUX_BUS_CLK:
 		*rate = CLOCK_GetFreq(kCLOCK_BusClk);
 		break;
@@ -154,13 +167,25 @@ static int mcux_lpc_syscon_clock_control_get_subsys_rate(
 		*rate = CLOCK_GetI3cClkFreq();
 		break;
 #endif
+
+#if defined(CONFIG_MIPI_DSI_MCUX_2L)
+	case MCUX_MIPI_DSI_DPHY_CLK:
+		*rate = CLOCK_GetMipiDphyClkFreq();
+		break;
+	case MCUX_MIPI_DSI_ESC_CLK:
+		*rate = CLOCK_GetMipiDphyEscTxClkFreq();
+		break;
+	case MCUX_LCDIF_PIXEL_CLK:
+		*rate = CLOCK_GetDcPixelClkFreq();
+		break;
+#endif
+#if defined(CONFIG_AUDIO_DMIC_MCUX)
+	case MCUX_DMIC_CLK:
+		*rate = CLOCK_GetDmicClkFreq();
+		break;
+#endif
 	}
 
-	return 0;
-}
-
-static int mcux_lpc_syscon_clock_control_init(const struct device *dev)
-{
 	return 0;
 }
 
@@ -173,7 +198,7 @@ static const struct clock_control_driver_api mcux_lpc_syscon_api = {
 #define LPC_CLOCK_INIT(n) \
 	\
 DEVICE_DT_INST_DEFINE(n, \
-		    &mcux_lpc_syscon_clock_control_init, \
+		    NULL, \
 		    NULL, \
 		    NULL, NULL, \
 		    PRE_KERNEL_1, CONFIG_CLOCK_CONTROL_INIT_PRIORITY, \

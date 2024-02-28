@@ -73,6 +73,11 @@ option for device power management.
     :kconfig:option:`CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE` is set to ``y`` (that is
     the default value when :kconfig:option:`CONFIG_PM_DEVICE_RUNTIME` is enabled)
 
+.. note::
+
+   Devices are suspended only when the last active core is entering a low power
+   state and devices are resumed by the first core that becomes active.
+
 Device Power Management States
 ******************************
 
@@ -141,7 +146,7 @@ support in a device driver.
     #define DT_DRV_COMPAT dummy_device
 
     static int dummy_driver_pm_action(const struct device *dev,
-                                      enum pm_device_action *action)
+                                      enum pm_device_action action)
     {
         switch (action) {
         case PM_DEVICE_ACTION_SUSPEND:

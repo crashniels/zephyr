@@ -4,6 +4,7 @@
 
 /*
  * Copyright (c) 2015-2016 Intel Corporation
+ * Copyright (c) 2023 Nordic Semiconductor
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,6 +17,8 @@
  * @ingroup bluetooth
  * @{
  */
+
+#include <sys/types.h>
 
 #include <zephyr/sys/atomic.h>
 #include <zephyr/bluetooth/buf.h>
@@ -93,6 +96,13 @@ typedef void (*bt_l2cap_chan_destroy_t)(struct bt_l2cap_chan *chan);
  *
  *  Used only by internal APIs dealing with setting channel to proper state
  *  depending on operational context.
+ *
+ *  A channel enters the @ref BT_L2CAP_CONNECTING state upon @ref
+ *  bt_l2cap_chan_connect, @ref bt_l2cap_ecred_chan_connect or upon returning
+ *  from @ref bt_l2cap_server.accept.
+ *
+ *  When a channel leaves the @ref BT_L2CAP_CONNECTING state, @ref
+ *  bt_l2cap_chan_ops.connected is called.
  */
 typedef enum bt_l2cap_chan_state {
 	/** Channel disconnected */
@@ -110,7 +120,7 @@ typedef enum bt_l2cap_chan_state {
 
 /** @brief Status of L2CAP channel. */
 typedef enum bt_l2cap_chan_status {
-	/** Channel output status */
+	/** Channel can send at least one PDU */
 	BT_L2CAP_STATUS_OUT,
 
 	/** @brief Channel shutdown status
@@ -164,28 +174,41 @@ struct bt_l2cap_le_chan {
 	 *  should inititalize the MTU of the Receiving Endpoint. Otherwise the
 	 *  MTU of the receiving endpoint will be initialized to
 	 *  @ref BT_L2CAP_SDU_RX_MTU by the stack.
+	 *
+	 *  This is the source of the MTU, MPS and credit values when sending
+	 *  L2CAP_LE_CREDIT_BASED_CONNECTION_REQ/RSP and
+	 *  L2CAP_CONFIGURATION_REQ.
 	 */
 	struct bt_l2cap_le_endpoint	rx;
 
 	/** Pending RX MTU on ECFC reconfigure, used internally by stack */
 	uint16_t pending_rx_mtu;
 
-	/** Channel Transmission Endpoint */
+	/** Channel Transmission Endpoint.
+	 *
+	 * This is an image of the remote's rx.
+	 *
+	 * The MTU and MPS is controlled by the remote by
+	 * L2CAP_LE_CREDIT_BASED_CONNECTION_REQ/RSP or L2CAP_CONFIGURATION_REQ.
+	 */
 	struct bt_l2cap_le_endpoint	tx;
+#if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
 	/** Channel Transmission queue */
 	struct k_fifo                   tx_queue;
 	/** Channel Pending Transmission buffer  */
 	struct net_buf                  *tx_buf;
 	/** Channel Transmission work  */
-	struct k_work			tx_work;
+	struct k_work_delayable		tx_work;
 	/** Segment SDU packet from upper layer */
 	struct net_buf			*_sdu;
 	uint16_t			_sdu_len;
+#if defined(CONFIG_BT_L2CAP_SEG_RECV)
+	uint16_t			_sdu_len_done;
+#endif /* CONFIG_BT_L2CAP_SEG_RECV */
 
 	struct k_work			rx_work;
 	struct k_fifo			rx_queue;
 
-#if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
 	bt_l2cap_chan_state_t		state;
 	/** Remote PSM to be connected */
 	uint16_t			psm;
@@ -323,8 +346,10 @@ struct bt_l2cap_chan_ops {
 
 	/** @brief Channel sent callback
 	 *
-	 *  If this callback is provided it will be called whenever a SDU has
-	 *  been completely sent.
+	 *  This callback will be called once the controller marks the SDU
+	 *  as completed. When the controller does so is implementation
+	 *  dependent. It could be after the SDU is enqueued for transmission,
+	 *  or after it is sent on air.
 	 *
 	 *  @param chan The channel which has sent data.
 	 */
@@ -356,6 +381,42 @@ struct bt_l2cap_chan_ops {
 	 *  @param chan The channel which was reconfigured
 	 */
 	void (*reconfigured)(struct bt_l2cap_chan *chan);
+
+#if defined(CONFIG_BT_L2CAP_SEG_RECV)
+	/** @brief Handle L2CAP segments directly
+	 *
+	 *  This is an alternative to @ref bt_l2cap_chan_ops.recv. They cannot
+	 *  be used together.
+	 *
+	 *  This is called immediately for each received segment.
+	 *
+	 *  Unlike with @ref bt_l2cap_chan_ops.recv, flow control is explicit.
+	 *  Each time this handler is invoked, the remote has permanently used
+	 *  up one credit. Use @ref bt_l2cap_chan_give_credits to give credits.
+	 *
+	 *  The start of an SDU is marked by `seg_offset == 0`. The end of an
+	 *  SDU is marked by `seg_offset + seg->len == sdu_len`.
+	 *
+	 *  The stack guarantees that:
+	 *    - The sender had the credit.
+	 *    - The SDU length does not exceed MTU.
+	 *    - The segment length does not exceed MPS.
+	 *
+	 *  Additionally, the L2CAP protocol is such that:
+	 *    - Segments come in order.
+	 *    - SDUs cannot be interleaved or aborted halfway.
+	 *
+	 *  @note With this alternative API, the application is responsible for
+	 *  setting the RX MTU and MPS. The MPS must not exceed @ref BT_L2CAP_RX_MTU.
+	 *
+	 *  @param chan The receiving channel.
+	 *  @param sdu_len Byte length of the SDU this segment is part of.
+	 *  @param seg_offset The byte offset of this segment in the SDU.
+	 *  @param seg The segment payload.
+	 */
+	void (*seg_recv)(struct bt_l2cap_chan *chan, size_t sdu_len,
+			 off_t seg_offset, struct net_buf_simple *seg);
+#endif /* CONFIG_BT_L2CAP_SEG_RECV */
 };
 
 /**
@@ -394,6 +455,7 @@ struct bt_l2cap_server {
 	 *  authorization.
 	 *
 	 *  @param conn The connection that is requesting authorization
+	 *  @param server Pointer to the server structure this callback relates to
 	 *  @param chan Pointer to received the allocated channel
 	 *
 	 *  @return 0 in case of success or negative value in case of error.
@@ -401,7 +463,8 @@ struct bt_l2cap_server {
 	 *  @return -EACCES if application did not authorize the connection.
 	 *  @return -EPERM if encryption key size is too short.
 	 */
-	int (*accept)(struct bt_conn *conn, struct bt_l2cap_chan **chan);
+	int (*accept)(struct bt_conn *conn, struct bt_l2cap_server *server,
+		      struct bt_l2cap_chan **chan);
 
 	sys_snode_t node;
 };
@@ -516,24 +579,53 @@ int bt_l2cap_chan_disconnect(struct bt_l2cap_chan *chan);
  *  size the buffers for the for the outgoing buffer pool.
  *
  *  When sending L2CAP data over an LE connection the application is sending
- *  L2CAP SDUs. The application can optionally reserve
+ *  L2CAP SDUs. The application shall reserve
  *  @ref BT_L2CAP_SDU_CHAN_SEND_RESERVE bytes in the buffer before sending.
- *  By reserving bytes in the buffer the stack can use this buffer as a segment
- *  directly, otherwise it will have to allocate a new segment for the first
- *  segment.
- *  If the application is reserving the bytes it should use the
- *  BT_L2CAP_BUF_SIZE() helper to correctly size the buffers for the for the
- *  outgoing buffer pool.
- *  When segmenting an L2CAP SDU into L2CAP PDUs the stack will first attempt
- *  to allocate buffers from the original buffer pool of the L2CAP SDU before
- *  using the stacks own buffer pool.
+ *
+ *  The application can use the BT_L2CAP_SDU_BUF_SIZE() helper to correctly size
+ *  the buffer to account for the reserved headroom.
+ *
+ *  When segmenting an L2CAP SDU into L2CAP PDUs the stack will first attempt to
+ *  allocate buffers from the channel's `alloc_seg` callback and will fallback
+ *  on the stack's global buffer pool (sized
+ *  @kconfig{CONFIG_BT_L2CAP_TX_BUF_COUNT}).
  *
  *  @note Buffer ownership is transferred to the stack in case of success, in
  *  case of an error the caller retains the ownership of the buffer.
  *
- *  @return Bytes sent in case of success or negative value in case of error.
+ *  @return 0 in case of success or negative value in case of error.
+ *  @return -EINVAL if `buf` or `chan` is NULL.
+ *  @return -EINVAL if `chan` is not either BR/EDR or LE credit-based.
+ *  @return -EINVAL if buffer doesn't have enough bytes reserved to fit header.
+ *  @return -EMSGSIZE if `buf` is larger than `chan`'s MTU.
+ *  @return -ENOTCONN if underlying conn is disconnected.
+ *  @return -ESHUTDOWN if L2CAP channel is disconnected.
+ *  @return -other (from lower layers) if chan is BR/EDR.
  */
 int bt_l2cap_chan_send(struct bt_l2cap_chan *chan, struct net_buf *buf);
+
+/** @brief Give credits to the remote
+ *
+ *  Only available for channels using @ref bt_l2cap_chan_ops.seg_recv.
+ *  @kconfig{CONFIG_BT_L2CAP_SEG_RECV} must be enabled to make this function
+ *  available.
+ *
+ *  Each credit given allows the peer to send one segment.
+ *
+ *  This function depends on a valid @p chan object. Make sure to
+ *  default-initialize or memset @p chan when allocating or reusing it for new
+ *  connections.
+ *
+ *  Adding zero credits is not allowed.
+ *
+ *  Credits can be given before entering the @ref BT_L2CAP_CONNECTING state.
+ *  Doing so will adjust the 'initial credits' sent in the connection PDU.
+ *
+ *  Must not be called while the channel is in @ref BT_L2CAP_CONNECTING state.
+ *
+ *  @return 0 in case of success or negative value in case of error.
+ */
+int bt_l2cap_chan_give_credits(struct bt_l2cap_chan *chan, uint16_t additional_credits);
 
 /** @brief Complete receiving L2CAP channel data
  *

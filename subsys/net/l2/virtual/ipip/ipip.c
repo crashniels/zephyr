@@ -49,13 +49,6 @@ struct ipip_context {
 	bool init_done;
 };
 
-static int ipip_init(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-
-	return 0;
-}
-
 static void iface_init(struct net_if *iface)
 {
 	struct ipip_context *ctx = net_if_get_device(iface)->data;
@@ -214,7 +207,7 @@ static int interface_send(struct net_if *iface, struct net_pkt *pkt)
 		ret = net_ipv4_create_full(tmp, ctx->my4addr,
 					   &ctx->peer.in_addr,
 					   tos, 0U, NET_IPV4_DF,
-					   0U, net_pkt_ipv4_ttl(tmp));
+					   0U);
 		if (ret < 0) {
 			goto out;
 		}
@@ -471,7 +464,7 @@ static int interface_set_config(struct net_if *iface,
 			ctx->family = AF_INET6;
 			net_virtual_set_name(iface, "IPv6 tunnel");
 
-			net_ipv6_set_hop_limit(iface, 64);
+			net_if_ipv6_set_hop_limit(iface, 64);
 
 			if (ctx->attached_to == NULL) {
 				(void)net_virtual_interface_attach(iface,
@@ -559,7 +552,7 @@ static const struct virtual_interface_api ipip_iface_api = {
 	}
 
 #define NET_IPIP_INTERFACE_INIT(x, _)					\
-	NET_VIRTUAL_INTERFACE_INIT(ipip##x, "IP_TUNNEL" #x, ipip_init,	\
+	NET_VIRTUAL_INTERFACE_INIT(ipip##x, "IP_TUNNEL" #x, NULL,	\
 				   NULL, &ipip_context_data_##x, NULL,	\
 				   CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,	\
 				   &ipip_iface_api, IPIPV4_MTU)

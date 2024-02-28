@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#define DT_DRV_COMPAT nxp_fxas21002
+
 #include <zephyr/logging/log.h>
 
 #include "fxas21002.h"
@@ -35,13 +37,8 @@ static int fxas21002_handle_drdy_int(const struct device *dev)
 {
 	struct fxas21002_data *data = dev->data;
 
-	struct sensor_trigger drdy_trig = {
-		.type = SENSOR_TRIG_DATA_READY,
-		.chan = SENSOR_CHAN_ALL,
-	};
-
 	if (data->drdy_handler) {
-		data->drdy_handler(dev, &drdy_trig);
+		data->drdy_handler(dev, data->drdy_trig);
 	}
 
 	return 0;
@@ -55,8 +52,8 @@ static void fxas21002_handle_int(const struct device *dev)
 
 	k_sem_take(&data->sem, K_FOREVER);
 
-	if (i2c_reg_read_byte_dt(&config->i2c, FXAS21002_REG_INT_SOURCE,
-				 &int_source)) {
+	if (config->ops->byte_read(dev, FXAS21002_REG_INT_SOURCE,
+				   &int_source)) {
 		LOG_ERR("Could not read interrupt source");
 		int_source = 0U;
 	}
@@ -71,8 +68,13 @@ static void fxas21002_handle_int(const struct device *dev)
 }
 
 #ifdef CONFIG_FXAS21002_TRIGGER_OWN_THREAD
-static void fxas21002_thread_main(struct fxas21002_data *data)
+static void fxas21002_thread_main(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct fxas21002_data *data = p1;
+
 	while (true) {
 		k_sem_take(&data->trig_sem, K_FOREVER);
 		fxas21002_handle_int(data->dev);
@@ -111,6 +113,7 @@ int fxas21002_trigger_set(const struct device *dev,
 	case SENSOR_TRIG_DATA_READY:
 		mask = FXAS21002_CTRLREG2_CFG_EN_MASK;
 		data->drdy_handler = handler;
+		data->drdy_trig = trig;
 		break;
 	default:
 		LOG_ERR("Unsupported sensor trigger");
@@ -136,8 +139,8 @@ int fxas21002_trigger_set(const struct device *dev,
 	}
 
 	/* Configure the sensor interrupt */
-	if (i2c_reg_update_byte_dt(&config->i2c, FXAS21002_REG_CTRLREG2, mask,
-				   handler ? mask : 0)) {
+	if (config->ops->reg_field_update(dev, FXAS21002_REG_CTRLREG2, mask,
+					  handler ? mask : 0)) {
 		LOG_ERR("Could not configure interrupt");
 		ret = -EIO;
 		goto exit;
@@ -175,7 +178,7 @@ int fxas21002_trigger_init(const struct device *dev)
 	k_sem_init(&data->trig_sem, 0, K_SEM_MAX_LIMIT);
 	k_thread_create(&data->thread, data->thread_stack,
 			CONFIG_FXAS21002_THREAD_STACK_SIZE,
-			(k_thread_entry_t)fxas21002_thread_main, data, 0, NULL,
+			fxas21002_thread_main, data, 0, NULL,
 			K_PRIO_COOP(CONFIG_FXAS21002_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 #elif defined(CONFIG_FXAS21002_TRIGGER_GLOBAL_THREAD)
@@ -188,13 +191,13 @@ int fxas21002_trigger_init(const struct device *dev)
 	ctrl_reg2 |= FXAS21002_CTRLREG2_CFG_DRDY_MASK;
 #endif
 
-	if (i2c_reg_write_byte_dt(&config->i2c, FXAS21002_REG_CTRLREG2,
-				  ctrl_reg2)) {
+	if (config->ops->byte_write(dev, FXAS21002_REG_CTRLREG2,
+				    ctrl_reg2)) {
 		LOG_ERR("Could not configure interrupt pin routing");
 		return -EIO;
 	}
 
-	if (!device_is_ready(config->int_gpio.port)) {
+	if (!gpio_is_ready_dt(&config->int_gpio)) {
 		LOG_ERR("GPIO device not ready");
 		return -ENODEV;
 	}

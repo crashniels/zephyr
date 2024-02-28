@@ -25,17 +25,17 @@ target hardware in the early phases of development.
 .. note::
 
    The POSIX architecture is not related and should not be confused with the
-   POSIX OS abstraction.
-   The later provides an adapatation shim that enables running applications
+   :ref:`POSIX OS abstraction<posix_support>`.
+   The latter provides an adaptation shim that enables running applications
    which require POSIX APIs on Zephyr.
 
 
 Types of POSIX arch based boards
 ================================
 
-Today there are two types of POSIX boards: The :ref:`native_posix<native_posix>`
-board and the :ref:`bsim boards<bsim boards>`.
-While they share the main objectives and principles, the first is intended as
+Today there are two types of POSIX boards: The native boards, :ref:`native_posix<native_posix>`
+and :ref:`native_sim<native_sim>`, and the :ref:`bsim boards<bsim boards>`.
+While they share the main objectives and principles, the first are intended as
 a HW agnostic test platform which in some cases utilizes the host OS
 peripherals, while the second intend to simulate a particular HW platform,
 with focus on their radio (e.g. BT LE) and utilize the `BabbleSim`_ physical layer
@@ -49,8 +49,7 @@ simulation and framework, while being fully decoupled of the host.
 Host system dependencies
 ========================
 
-This port is designed to run in POSIX compatible operating systems,
-but it has only been tested on Linux.
+This port is designed and tested to run in Linux.
 
 .. note::
 
@@ -59,11 +58,16 @@ but it has only been tested on Linux.
 
 .. note::
 
+   The POSIX architecture is known to **not** work on macOS due to
+   fundamental differences between macOS and other typical Unixes.
+
+.. note::
+
    The 32 bit version of this port does not directly work in Windows Subsystem
    for Linux (WSL) because WSL does not support native 32-bit binaries.
-   You may want to consider WSL2, or, if using native_posix,
-   you can also just use the native_posix_64
-   target: Check :ref:`32 and 64bit versions<native_posix32_64>`.
+   You may want to consider WSL2, or, if using :ref:`native_sim <native_sim>`,
+   you can also just use the ``native_sim_64``
+   target: Check :ref:`32 and 64bit versions<native_sim32_64>`.
    Otherwise `with some tinkering
    <https://github.com/microsoft/WSL/issues/2468#issuecomment-374904520>`_ it
    should be possible to make it work.
@@ -165,6 +169,24 @@ In the previous example, modifying the code as follows would work:
     #endif
    }
 
+.. _posix_arch_unsupported:
+
+Significant unsupported features
+********************************
+
+Currently, these are the most significant features which are not supported in this architecture:
+
+* :ref:`User mode/userspace <usermode_api>`: When building for these targets,
+  :kconfig:option:`CONFIG_USERSPACE` will always be disabled,
+  and all calls into the kernel will be done as normal calls.
+
+* Stack checks: :kconfig:option:`CONFIG_HW_STACK_PROTECTION`,
+  :kconfig:option:`CONFIG_STACK_CANARIES`, and
+  :kconfig:option:`CONFIG_THREAD_ANALYZER`.
+  This is due to how Zephyr allocated threads' stacks are not `actually` being used like they are
+  in other architectures. Check
+  :ref:`the architecture section's architecture layer paragraph <posix_arch_design_archl>`
+  for more information.
 
 .. _posix_arch_rationale:
 
@@ -215,7 +237,7 @@ section.
     instruction executes is just some of it; Emulating peripherals accurately
     is another side.
 
-This native port compiles your code directly for the host architectture
+This native port compiles your code directly for the host architecture
 (typically x86), with no instrumentation or
 monitoring code. Your code executes directly in the host CPU. That is, your code
 executes just as fast as it possibly can.
@@ -290,6 +312,8 @@ Architecture and design
     Zephyr layering when built against an embedded target (left), and
     targeting a POSIX arch based board (right)
 
+.. _posix_arch_design_archl:
+
 Arch layer
 ==========
 
@@ -319,7 +343,7 @@ SOC and board layers
    This description applies to all current POSIX arch based boards on tree,
    but it is not a requirement for another board to follow what is described here.
 
-When the executable process is started (that is the the board
+When the executable process is started (that is the board
 :c:func:`main`, which is the linux executable C :c:func:`main`),
 first, early initialization steps are taken care of
 (command line argument parsing, initialization of the HW models, etc).
@@ -350,10 +374,10 @@ and this thread will check what is the next
 scheduled HW event, advance simulated time until that point, and call the
 corresponding HW model event function.
 
-Eventually one of these HW models will raise an interrupt to the simulated CPU.
-When the IRQ controller wants to wake the simulated CPU, the HW thread is
-blocked, and the simulated CPU is awaken by letting the last SW thread continue
-executing.
+Eventually one of these HW models will raise an interrupt to the
+simulated CPU. When the IRQ controller wants to wake the simulated
+CPU, the HW thread is blocked, and the simulated CPU is awakened by
+letting the last SW thread continue executing.
 
 This process of getting the CPU to sleep, letting the HW models run,
 and raising an interrupt which wake the CPU again is repeated until the end
@@ -387,7 +411,7 @@ Busy waits
 ==========
 
 Busy waits work thanks to provided board functionality.
-This does not need to be the same for all boards, but both native_posix and the
+This does not need to be the same for all boards, but both native_sim and the
 nrf52_bsim board work similarly thru the combination of a board specific
 `arch_busy_wait()` and a special fake HW timer (provided by the board).
 

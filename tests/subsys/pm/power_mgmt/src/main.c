@@ -27,7 +27,9 @@ static bool idle_entered;
 static bool testing_device_runtime;
 static bool testing_device_order;
 static bool testing_device_lock;
+static bool testing_force_state;
 
+enum pm_state forced_state;
 static const struct device *device_dummy;
 static struct dummy_driver_api *api;
 
@@ -53,15 +55,6 @@ static const struct device *const device_c =
  * when suspending / resuming device B.
  */
 
-
-/* Common init function for devices A,B and C */
-static int device_init(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-
-	return 0;
-}
-
 static int device_a_pm_action(const struct device *dev,
 		enum pm_device_action pm_action)
 {
@@ -73,7 +66,7 @@ static int device_a_pm_action(const struct device *dev,
 
 PM_DEVICE_DT_DEFINE(DT_INST(0, test_device_pm), device_a_pm_action);
 
-DEVICE_DT_DEFINE(DT_INST(0, test_device_pm), device_init,
+DEVICE_DT_DEFINE(DT_INST(0, test_device_pm), NULL,
 		PM_DEVICE_DT_GET(DT_INST(0, test_device_pm)), NULL, NULL,
 		PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		NULL);
@@ -118,7 +111,7 @@ static int device_b_pm_action(const struct device *dev,
 
 PM_DEVICE_DT_DEFINE(DT_INST(1, test_device_pm), device_b_pm_action);
 
-DEVICE_DT_DEFINE(DT_INST(1, test_device_pm), device_init,
+DEVICE_DT_DEFINE(DT_INST(1, test_device_pm), NULL,
 		PM_DEVICE_DT_GET(DT_INST(1, test_device_pm)), NULL, NULL,
 		PRE_KERNEL_2, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		NULL);
@@ -134,12 +127,36 @@ static int device_c_pm_action(const struct device *dev,
 
 PM_DEVICE_DT_DEFINE(DT_INST(2, test_device_pm), device_c_pm_action);
 
-DEVICE_DT_DEFINE(DT_INST(2, test_device_pm), device_init,
+DEVICE_DT_DEFINE(DT_INST(2, test_device_pm), NULL,
 		PM_DEVICE_DT_GET(DT_INST(2, test_device_pm)), NULL, NULL,
 		POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
 		NULL);
 
+static int device_init_failed(const struct device *dev)
+{
+	ARG_UNUSED(dev);
 
+	/* Return error to mark device as not ready. */
+	return -EIO;
+}
+
+static int device_d_pm_action(const struct device *dev,
+		enum pm_device_action pm_action)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(pm_action);
+
+	zassert_unreachable("Entered PM handler for unready device");
+
+	return 0;
+}
+
+PM_DEVICE_DT_DEFINE(DT_INST(3, test_device_pm), device_d_pm_action);
+
+DEVICE_DT_DEFINE(DT_INST(3, test_device_pm), device_init_failed,
+		PM_DEVICE_DT_GET(DT_INST(3, test_device_pm)), NULL, NULL,
+		POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+		NULL);
 
 void pm_state_set(enum pm_state state, uint8_t substate_id)
 {
@@ -165,6 +182,12 @@ void pm_state_set(enum pm_state state, uint8_t substate_id)
 		return;
 	}
 
+	if (testing_force_state) {
+		/* if forced to given power state was called */
+		set_pm = true;
+		zassert_equal(state, forced_state, NULL);
+		testing_force_state = false;
+	}
 
 	/* at this point, notify_pm_state_entry() implemented in
 	 * this file has been called and set_pm should have been set
@@ -427,6 +450,25 @@ ZTEST(power_management_1cpu, test_device_state_lock)
 	pm_device_state_unlock(device_a);
 
 	testing_device_lock = false;
+}
+
+ZTEST(power_management_1cpu, test_empty_states)
+{
+	const struct pm_state_info *cpu_states;
+	uint8_t state = pm_state_cpu_get_all(1u, &cpu_states);
+
+	zassert_equal(state, 0, NULL);
+}
+
+ZTEST(power_management_1cpu, test_force_state)
+{
+	forced_state = PM_STATE_STANDBY;
+	bool ret = pm_state_force(0, &(struct pm_state_info) {forced_state, 0, 0});
+
+	zassert_equal(ret, true, "Error in force state");
+
+	testing_force_state = true;
+	k_sleep(K_SECONDS(1U));
 }
 
 void power_management_1cpu_teardown(void *data)

@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2016 Piotr Mienkowski
  * Copyright (c) 2018 Antmicro Ltd
+ * Copyright (c) 2023 Gerson Fernando Budke
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -33,6 +34,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/sys/barrier.h>
 #include <zephyr/sys/util.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -43,6 +45,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 #include <ethernet/eth_stats.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/pinctrl.h>
+#include <zephyr/drivers/clock_control/atmel_sam_pmc.h>
 #include <soc.h>
 #include "eth_sam_gmac_priv.h"
 
@@ -129,6 +132,8 @@ static inline void dcache_clean(uint32_t addr, uint32_t size)
 #error Not enough RX buffers to allocate descriptors for each HW queue
 #endif
 #endif /* !CONFIG_NET_TEST */
+
+BUILD_ASSERT(DT_INST_ENUM_IDX(0, phy_connection_type) <= 1, "Invalid PHY connection");
 
 /* RX descriptors list */
 static struct gmac_desc rx_desc_que0[MAIN_QUEUE_RX_DESC_COUNT]
@@ -477,7 +482,8 @@ static int rx_descriptors_init(Gmac *gmac, struct gmac_queue *queue)
 	rx_desc_list->tail = 0U;
 
 	for (int i = 0; i < rx_desc_list->len; i++) {
-		rx_buf = net_pkt_get_reserve_rx_data(K_NO_WAIT);
+		rx_buf = net_pkt_get_reserve_rx_data(CONFIG_NET_BUF_DATA_SIZE,
+						     K_NO_WAIT);
 		if (rx_buf == NULL) {
 			free_rx_bufs(rx_frag_list, rx_desc_list->len);
 			LOG_ERR("Failed to reserve data net buffers");
@@ -1109,7 +1115,20 @@ static int gmac_init(Gmac *gmac, uint32_t gmac_ncfgr_val)
 	/* Setup Network Configuration Register */
 	gmac->GMAC_NCFGR = gmac_ncfgr_val | mck_divisor;
 
-	gmac->GMAC_UR = DT_INST_ENUM_IDX(0, phy_connection_type);
+	/* Default (RMII) is defined at atmel,gmac-common.yaml file */
+	switch (DT_INST_ENUM_IDX(0, phy_connection_type)) {
+	case 0: /* mii */
+		gmac->GMAC_UR = 0x1;
+		break;
+	case 1: /* rmii */
+		gmac->GMAC_UR = 0x0;
+		break;
+	default:
+		/* Build assert at top of file should catch this case */
+		LOG_ERR("The phy connection type is invalid");
+
+		return -EINVAL;
+	}
 
 #if defined(CONFIG_PTP_CLOCK_SAM_GMAC)
 	/* Initialize PTP Clock Registers */
@@ -1217,6 +1236,10 @@ static int nonpriority_queue_init(Gmac *gmac, struct gmac_queue *queue)
 	gmac->GMAC_DCFGR =
 		/* Receive Buffer Size (defined in multiples of 64 bytes) */
 		GMAC_DCFGR_DRBS(CONFIG_NET_BUF_DATA_SIZE >> 6) |
+#if defined(GMAC_DCFGR_RXBMS)
+		/* Use full receive buffer size on parts where this is selectable */
+		GMAC_DCFGR_RXBMS(3) |
+#endif
 		/* Attempt to use INCR4 AHB bursts (Default) */
 		GMAC_DCFGR_FBLDO_INCR4 |
 		/* DMA Queue Flags */
@@ -1308,7 +1331,7 @@ static struct net_pkt *frame_get(struct gmac_queue *queue)
 			dcache_invalidate((uint32_t)frag_data, frag->size);
 
 			/* Get a new data net buffer from the buffer pool */
-			new_frag = net_pkt_get_frag(rx_frame, K_NO_WAIT);
+			new_frag = net_pkt_get_frag(rx_frame, CONFIG_NET_BUF_DATA_SIZE, K_NO_WAIT);
 			if (new_frag == NULL) {
 				queue->err_rx_frames_dropped++;
 				net_pkt_unref(rx_frame);
@@ -1331,7 +1354,7 @@ static struct net_pkt *frame_get(struct gmac_queue *queue)
 		/* Guarantee that status word is written before the address
 		 * word to avoid race condition.
 		 */
-		__DMB();  /* data memory barrier */
+		barrier_dmem_fence_full();
 		/* Update buffer descriptor address word */
 		wrap = (tail == rx_desc_list->len-1U ? GMAC_RXW0_WRAP : 0);
 		rx_desc->w0 = ((uint32_t)frag->data & GMAC_RXW0_ADDR) | wrap;
@@ -1373,9 +1396,9 @@ static void eth_rx(struct gmac_queue *queue)
 		 * the used VLAN tag.
 		 */
 		{
-			struct net_eth_hdr *hdr = NET_ETH_HDR(rx_frame);
+			struct net_eth_hdr *p_hdr = NET_ETH_HDR(rx_frame);
 
-			if (ntohs(hdr->type) == NET_ETH_PTYPE_VLAN) {
+			if (ntohs(p_hdr->type) == NET_ETH_PTYPE_VLAN) {
 				struct net_eth_vlan_hdr *hdr_vlan =
 					(struct net_eth_vlan_hdr *)
 					NET_ETH_HDR(rx_frame);
@@ -1576,7 +1599,7 @@ static int eth_tx(const struct device *dev, struct net_pkt *pkt)
 	/* Guarantee that all the fragments have been written before removing
 	 * the used bit to avoid race condition.
 	 */
-	__DMB();  /* data memory barrier */
+	barrier_dmem_fence_full();
 
 	/* Remove the used bit of the first fragment to allow the controller
 	 * to process it and the following fragments.
@@ -1598,7 +1621,7 @@ static int eth_tx(const struct device *dev, struct net_pkt *pkt)
 	/* Guarantee that the first fragment got its bit removed before starting
 	 * sending packets to avoid packets getting stuck.
 	 */
-	__DMB();  /* data memory barrier */
+	barrier_dmem_fence_full();
 
 	/* Start transmission */
 	gmac->GMAC_NCR |= GMAC_NCR_TSTART;
@@ -1775,8 +1798,8 @@ static int eth_initialize(const struct device *dev)
 
 #ifdef CONFIG_SOC_FAMILY_SAM
 	/* Enable GMAC module's clock */
-	soc_pmc_peripheral_enable(cfg->periph_id);
-
+	(void)clock_control_on(SAM_DT_PMC_CONTROLLER,
+			       (clock_control_subsys_t)&cfg->clock_cfg);
 #else
 	/* Enable MCLK clock on GMAC */
 	MCLK->AHBMASK.reg |= MCLK_AHBMASK_GMAC;
@@ -1965,7 +1988,9 @@ static void eth0_iface_init(struct net_if *iface)
 	}
 
 	/* Do not start the interface until PHY link is up */
-	net_if_carrier_off(iface);
+	if (!(dev_data->link_up)) {
+		net_if_carrier_off(iface);
+	}
 
 	init_done = true;
 }
@@ -2211,14 +2236,10 @@ static const struct eth_sam_dev_cfg eth0_config = {
 	.regs = (Gmac *)DT_INST_REG_ADDR(0),
 	.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(0),
 #ifdef CONFIG_SOC_FAMILY_SAM
-	.periph_id = DT_INST_PROP_OR(0, peripheral_id, 0),
+	.clock_cfg = SAM_DT_INST_CLOCK_PMC_CFG(0),
 #endif
 	.config_func = eth0_irq_config,
-#if DT_NODE_EXISTS(DT_INST_CHILD(0, phy))
-	.phy_dev = DEVICE_DT_GET(DT_INST_CHILD(0, phy))
-#else
-#error "No PHY driver specified"
-#endif
+	.phy_dev = DEVICE_DT_GET(DT_INST_PHANDLE(0, phy_handle))
 };
 
 static struct eth_sam_dev_data eth0_data = {
@@ -2433,7 +2454,7 @@ static int ptp_clock_sam_gmac_adjust(const struct device *dev, int increment)
 	const struct eth_sam_dev_cfg *const cfg = ptp_context->eth_dev->config;
 	Gmac *gmac = cfg->regs;
 
-	if ((increment <= -NSEC_PER_SEC) || (increment >= NSEC_PER_SEC)) {
+	if ((increment <= -(int)NSEC_PER_SEC) || (increment >= (int)NSEC_PER_SEC)) {
 		return -EINVAL;
 	}
 
@@ -2473,6 +2494,6 @@ static int ptp_gmac_init(const struct device *port)
 
 DEVICE_DEFINE(gmac_ptp_clock_0, PTP_CLOCK_NAME, ptp_gmac_init,
 		NULL, &ptp_gmac_0_context, NULL, POST_KERNEL,
-		CONFIG_APPLICATION_INIT_PRIORITY, &ptp_api);
+		CONFIG_PTP_CLOCK_INIT_PRIORITY, &ptp_api);
 
 #endif /* CONFIG_PTP_CLOCK_SAM_GMAC */

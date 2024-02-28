@@ -46,6 +46,7 @@ int stts751_trigger_set(const struct device *dev,
 
 	if (trig->chan == SENSOR_CHAN_ALL) {
 		stts751->thsld_handler = handler;
+		stts751->thsld_trigger = trig;
 		if (handler) {
 			return stts751_enable_int(dev, 1);
 		} else {
@@ -64,16 +65,13 @@ static void stts751_handle_interrupt(const struct device *dev)
 {
 	struct stts751_data *stts751 = dev->data;
 	const struct stts751_config *cfg = dev->config;
-	struct sensor_trigger thsld_trigger = {
-		.type = SENSOR_TRIG_THRESHOLD,
-	};
 	stts751_status_t status;
 
 	stts751_status_reg_get(stts751->ctx, &status);
 
 	if (stts751->thsld_handler != NULL &&
 	    (status.t_high || status.t_low)) {
-		stts751->thsld_handler(dev, &thsld_trigger);
+		stts751->thsld_handler(dev, stts751->thsld_trigger);
 	}
 
 	gpio_pin_interrupt_configure_dt(&cfg->int_gpio, GPIO_INT_EDGE_TO_ACTIVE);
@@ -98,8 +96,13 @@ static void stts751_gpio_callback(const struct device *dev,
 }
 
 #ifdef CONFIG_STTS751_TRIGGER_OWN_THREAD
-static void stts751_thread(struct stts751_data *stts751)
+static void stts751_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct stts751_data *stts751 = p1;
+
 	while (1) {
 		k_sem_take(&stts751->gpio_sem, K_FOREVER);
 		stts751_handle_interrupt(stts751->dev);
@@ -123,7 +126,7 @@ int stts751_init_interrupt(const struct device *dev)
 	const struct stts751_config *cfg = dev->config;
 	int ret;
 
-	if (!device_is_ready(cfg->int_gpio.port)) {
+	if (!gpio_is_ready_dt(&cfg->int_gpio)) {
 		LOG_ERR("GPIO device not ready");
 		return -ENODEV;
 	}
@@ -133,7 +136,7 @@ int stts751_init_interrupt(const struct device *dev)
 
 	k_thread_create(&stts751->thread, stts751->thread_stack,
 			CONFIG_STTS751_THREAD_STACK_SIZE,
-			(k_thread_entry_t)stts751_thread, stts751,
+			stts751_thread, stts751,
 			NULL, NULL, K_PRIO_COOP(CONFIG_STTS751_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 #elif defined(CONFIG_STTS751_TRIGGER_GLOBAL_THREAD)

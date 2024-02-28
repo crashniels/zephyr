@@ -102,6 +102,76 @@
 #define PDU_DC_PAYLOAD_TIME_MAX       2120
 #endif /* !CONFIG_BT_CTLR_DF */
 
+/* Data channel control PDU maximum payload size */
+#if defined(CONFIG_BT_CONN)
+#if defined(CONFIG_BT_CTLR_CONN_ISO)
+#if defined(CONFIG_BT_CENTRAL) && defined(CONFIG_BT_PERIPHERAL)
+/* Isochronous Central and Peripheral */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_req)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_req)
+#elif defined(CONFIG_BT_CENTRAL)
+/* Isochronous Central */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_req)
+#if defined(CONFIG_BT_CTLR_CONN_PARAM_REQ)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_param_req)
+#elif defined(CONFIG_BT_CTLR_LE_ENC)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_rsp)
+#else /* !CONFIG_BT_CTLR_LE_ENC */
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_rsp)
+#endif /* !CONFIG_BT_CTLR_LE_ENC */
+#elif defined(CONFIG_BT_PERIPHERAL)
+/* Isochronous Peripheral */
+#if defined(CONFIG_BT_CTLR_CONN_PARAM_REQ)
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_param_req)
+#elif defined(CONFIG_BT_CTLR_LE_ENC)
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_rsp)
+#else /* !CONFIG_BT_CTLR_LE_ENC */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_rsp)
+#endif /* !CONFIG_BT_CTLR_LE_ENC */
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(cis_req)
+#endif /* !CONFIG_BT_PERIPHERAL */
+
+#elif defined(CONFIG_BT_CTLR_CONN_PARAM_REQ)
+/* Central and Peripheral with Connection Parameter Request */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_param_req)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_param_req)
+
+#elif defined(CONFIG_BT_CTLR_LE_ENC)
+#if defined(CONFIG_BT_CENTRAL) && defined(CONFIG_BT_PERIPHERAL)
+/* Central and Peripheral with encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_req)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_req)
+#elif defined(CONFIG_BT_CENTRAL)
+/* Central with encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_req)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_rsp)
+#elif defined(CONFIG_BT_PERIPHERAL)
+/* Peripheral with encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_rsp)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(enc_req)
+#endif /* !CONFIG_BT_PERIPHERAL */
+
+#else /* !CONFIG_BT_CTLR_LE_ENC */
+#if defined(CONFIG_BT_CENTRAL) && defined(CONFIG_BT_PERIPHERAL)
+/* Central and Peripheral without encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_update_ind)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_update_ind)
+#elif defined(CONFIG_BT_CENTRAL)
+/* Central without encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_update_ind)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(feature_rsp)
+#elif defined(CONFIG_BT_PERIPHERAL)
+/* Peripheral without encryption */
+#define PDU_DC_CTRL_TX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(feature_rsp)
+#define PDU_DC_CTRL_RX_SIZE_MAX       PDU_DATA_LLCTRL_LEN(conn_update_ind)
+#endif /* !CONFIG_BT_PERIPHERAL */
+#endif /* !CONFIG_BT_CTLR_LE_ENC */
+
+#else /* !CONFIG_BT_CONN */
+#define PDU_DC_CTRL_TX_SIZE_MAX       0U
+#define PDU_DC_CTRL_RX_SIZE_MAX       0U
+#endif /* !CONFIG_BT_CONN */
+
 /* Link Layer header size of Data PDU. Assumes pdu_data is packed */
 #define PDU_DC_LL_HEADER_SIZE  (offsetof(struct pdu_data, lldata))
 
@@ -155,6 +225,19 @@
 					     (((aux_ptr)->offs_phy_packed[1] & 0x1F) << 8))
 #define PDU_ADV_AUX_PTR_PHY_GET(aux_ptr) (((aux_ptr)->offs_phy_packed[1] >> 5) & 0x07)
 
+/* Macros for getting/setting offset/offset_units/offset_adjust from pdu_adv_sync_info */
+#define PDU_ADV_SYNC_INFO_OFFSET_GET(si) ((si)->offs_packed[0] | \
+					 (((si)->offs_packed[1] & 0x1F) << 8))
+#define PDU_ADV_SYNC_INFO_OFFS_UNITS_GET(si) (((si)->offs_packed[1] >> 5) & 0x01)
+#define PDU_ADV_SYNC_INFO_OFFS_ADJUST_GET(si) (((si)->offs_packed[1] >> 6) & 0x01)
+#define PDU_ADV_SYNC_INFO_OFFS_SET(si, offs, offs_units, offs_adjust) \
+	do { \
+		(si)->offs_packed[0] = (offs) & 0xFF; \
+		(si)->offs_packed[1] = (((offs) >> 8) & 0x1F) + \
+				       (((offs_units) << 5) & 0x20) + \
+				       (((offs_adjust) << 6) & 0x40); \
+	} while (0)
+
 /* Advertiser's Sleep Clock Accuracy Value */
 #define SCA_500_PPM       500 /* 51 ppm to 500 ppm */
 #define SCA_50_PPM        50  /* 0 ppm to 50 ppm */
@@ -181,6 +264,9 @@
 #define PDU_ADV_DATA_HEADER_TYPE_OFFSET 1U
 #define PDU_ADV_DATA_HEADER_DATA_OFFSET 2U
 
+/* Advertising Data Types in ACAD */
+#define PDU_ADV_DATA_TYPE_CHANNEL_MAP_UPDATE_IND 0x28
+
 /*
  * Macros to return correct Data Channel PDU time
  * Note: formula is valid for 1M, 2M and Coded S8
@@ -194,6 +280,18 @@
 #define PHY_CODED    BIT(2)
 #define PHY_FLAGS_S2 0
 #define PHY_FLAGS_S8 BIT(0)
+
+/* Macros for getting/setting did/sid from pdu_adv_adi */
+#define PDU_ADV_ADI_DID_GET(adi) ((adi)->did_sid_packed[0] | \
+					     (((adi)->did_sid_packed[1] & 0x0F) << 8))
+#define PDU_ADV_ADI_SID_GET(adi) (((adi)->did_sid_packed[1] >> 4) & 0x0F)
+#define PDU_ADV_ADI_SID_SET(adi, sid) (adi)->did_sid_packed[1] = (((sid) << 4) + \
+								 ((adi)->did_sid_packed[1] & 0x0F))
+#define PDU_ADV_ADI_DID_SID_SET(adi, did, sid) \
+	do { \
+		(adi)->did_sid_packed[0] = (did) & 0xFF; \
+		(adi)->did_sid_packed[1] = (((did) >> 8) & 0x0F) + ((sid) << 4); \
+	} while (0)
 
 #if defined(CONFIG_BT_CTLR_PHY_CODED)
 #define CODED_PHY_PREAMBLE_TIME_US       80
@@ -264,6 +362,12 @@
 #define PDU_BIS_US(octets, enc, phy, s8) PDU_US((octets), \
 						((enc) ? (PDU_MIC_SIZE) : 0), \
 						(phy), (s8))
+
+#define PDU_CIS_MAX_US(octets, enc, phy) PDU_MAX_US((octets), \
+						    ((enc) ? \
+						     (PDU_MIC_SIZE) : 0), \
+						    (phy))
+#define PDU_CIS_OFFSET_MIN_US 500U
 
 struct pdu_adv_adv_ind {
 	uint8_t addr[BDADDR_SIZE];
@@ -354,13 +458,12 @@ enum pdu_adv_mode {
 #define PDU_ADV_SID_COUNT 16
 
 struct pdu_adv_adi {
-#ifdef CONFIG_LITTLE_ENDIAN
-	uint16_t did:12;
-	uint16_t sid:4;
-#else
-	uint16_t sid:4;
-	uint16_t did:12;
-#endif /* CONFIG_LITTLE_ENDIAN */
+	/* did:12
+	 * sid:4
+	 * NOTE: This layout as bitfields is not portable for BE using
+	 * endianness conversion macros.
+	 */
+	uint8_t did_sid_packed[2];
 } __packed;
 
 struct pdu_adv_aux_ptr {
@@ -397,33 +500,18 @@ enum pdu_adv_aux_phy {
 	EXT_ADV_AUX_PHY_LE_CODED = 0x02,
 };
 
-struct pdu_cte_info {
-#ifdef CONFIG_LITTLE_ENDIAN
-	uint8_t  time:5;
-	uint8_t  rfu:1;
-	uint8_t  type:2;
-#else
-	uint8_t  type:2;
-	uint8_t  rfu:1;
-	uint8_t  time:5;
-#endif /* CONFIG_LITTLE_ENDIAN */
-} __packed;
-
 struct pdu_adv_sync_info {
-#ifdef CONFIG_LITTLE_ENDIAN
-	uint16_t offs:13;
-	uint16_t offs_units:1;
-	uint16_t offs_adjust:1;
-	uint16_t rfu:1;
-#else
-	uint16_t rfu:1;
-	uint16_t offs_adjust:1;
-	uint16_t offs_units:1;
-	uint16_t offs:13;
-#endif /* CONFIG_LITTLE_ENDIAN */
+	/* offs:13
+	 * offs_units:1
+	 * offs_adjust:1
+	 * rfu:1
+	 * NOTE: This layout as bitfields is not portable for BE using
+	 * endianness conversion macros.
+	 */
+	uint8_t  offs_packed[2];
 	uint16_t interval;
 	uint8_t  sca_chm[PDU_CHANNEL_MAP_SIZE];
-	uint32_t aa;
+	uint8_t  aa[4];
 	uint8_t  crc_init[3];
 	uint16_t evt_cntr;
 } __packed;
@@ -524,6 +612,8 @@ enum pdu_data_llctrl_type {
 	PDU_DATA_LLCTRL_TYPE_MIN_USED_CHAN_IND = 0x19,
 	PDU_DATA_LLCTRL_TYPE_CTE_REQ = 0x1A,
 	PDU_DATA_LLCTRL_TYPE_CTE_RSP = 0x1B,
+	PDU_DATA_LLCTRL_TYPE_CLOCK_ACCURACY_REQ = 0x1D,
+	PDU_DATA_LLCTRL_TYPE_CLOCK_ACCURACY_RSP = 0x1E,
 	PDU_DATA_LLCTRL_TYPE_CIS_REQ = 0x1F,
 	PDU_DATA_LLCTRL_TYPE_CIS_RSP = 0x20,
 	PDU_DATA_LLCTRL_TYPE_CIS_IND = 0x21,
@@ -633,6 +723,26 @@ struct pdu_data_llctrl_conn_param_rsp {
 	uint16_t offset5;
 } __packed;
 
+/*
+ * According to Spec Core v5.3, section 2.4.2.17
+ * LL_CONNECTION_PARAM_RSP and LL_CONNECTION_PARAM_REQ are identical
+ * This is utilized in pdu encode/decode, and for this is needed a common struct
+ */
+struct pdu_data_llctrl_conn_param_req_rsp_common {
+	uint16_t interval_min;
+	uint16_t interval_max;
+	uint16_t latency;
+	uint16_t timeout;
+	uint8_t  preferred_periodicity;
+	uint16_t reference_conn_event_count;
+	uint16_t offset0;
+	uint16_t offset1;
+	uint16_t offset2;
+	uint16_t offset3;
+	uint16_t offset4;
+	uint16_t offset5;
+} __packed;
+
 struct pdu_data_llctrl_reject_ext_ind {
 	uint8_t reject_opcode;
 	uint8_t error_code;
@@ -654,6 +764,18 @@ struct pdu_data_llctrl_length_req {
 } __packed;
 
 struct pdu_data_llctrl_length_rsp {
+	uint16_t max_rx_octets;
+	uint16_t max_rx_time;
+	uint16_t max_tx_octets;
+	uint16_t max_tx_time;
+} __packed;
+
+/*
+ * According to Spec Core v5.3, section 2.4.2.21
+ * LL_LENGTH_REQ and LL_LENGTH_RSP are identical
+ * This is utilized in pdu encode/decode, and for this is needed a common struct
+ */
+struct pdu_data_llctrl_length_req_rsp_common {
 	uint16_t max_rx_octets;
 	uint16_t max_rx_time;
 	uint16_t max_tx_octets;
@@ -695,6 +817,14 @@ struct pdu_data_llctrl_cte_req {
 
 struct pdu_data_llctrl_cte_rsp {
 	/* no members */
+} __packed;
+
+struct pdu_data_llctrl_clock_accuracy_req {
+	uint8_t sca;
+} __packed;
+
+struct pdu_data_llctrl_clock_accuracy_rsp {
+	uint8_t sca;
 } __packed;
 
 struct pdu_data_llctrl_cis_req {
@@ -787,6 +917,8 @@ struct pdu_data_llctrl {
 		struct pdu_data_llctrl_min_used_chans_ind min_used_chans_ind;
 		struct pdu_data_llctrl_cte_req cte_req;
 		struct pdu_data_llctrl_cte_rsp cte_rsp;
+		struct pdu_data_llctrl_clock_accuracy_req clock_accuracy_req;
+		struct pdu_data_llctrl_clock_accuracy_rsp clock_accuracy_rsp;
 		struct pdu_data_llctrl_cis_req cis_req;
 		struct pdu_data_llctrl_cis_rsp cis_rsp;
 		struct pdu_data_llctrl_cis_ind cis_ind;
@@ -839,14 +971,7 @@ struct pdu_data {
 
 	uint8_t len;
 
-#if !defined(CONFIG_SOC_OPENISA_RV32M1_RISCV32)
-#if !defined(CONFIG_BT_CTLR_DATA_LENGTH_CLEAR)
-	union {
-		uint8_t resv; /* TODO: remove nRF specific code */
-		struct pdu_cte_info cte_info; /* BT 5.1 Core spec. CTEInfo storage */
-	};
-#endif /* !CONFIG_BT_CTLR_DATA_LENGTH_CLEAR */
-#endif /* !CONFIG_SOC_OPENISA_RV32M1_RISCV32 */
+	struct pdu_data_vnd_octet3 octet3;
 
 	union {
 		struct pdu_data_llctrl llctrl;
@@ -873,7 +998,11 @@ struct pdu_iso {
 	uint8_t hdr_other:6;
 	uint8_t ll_id:2;
 #endif /* CONFIG_LITTLE_ENDIAN */
-	uint8_t length;
+
+	uint8_t len;
+
+	struct pdu_iso_vnd_octet3 octet3;
+
 	uint8_t payload[0];
 } __packed;
 
@@ -887,20 +1016,20 @@ struct pdu_iso_sdu_sh {
 	uint8_t cmplt:1;
 	uint8_t rfu:6;
 
-	uint8_t length;
+	uint8_t len;
 	/* Note, timeoffset only available in first segment of sdu */
 	uint32_t timeoffset:24;
 	uint32_t payload:8;
-
 #else
 	uint8_t rfu:6;
 	uint8_t cmplt:1;
 	uint8_t sc:1;
 
-	uint8_t length;
+	uint8_t len;
+
 	/* Note, timeoffset only available in first segment of sdu */
-	uint32_t payload:8;
 	uint32_t timeoffset:24;
+	uint32_t payload:8;
 #endif /* CONFIG_LITTLE_ENDIAN */
 } __packed;
 
@@ -931,7 +1060,11 @@ struct pdu_cis {
 	uint8_t nesn:1;
 	uint8_t ll_id:2;
 #endif /* CONFIG_LITTLE_ENDIAN */
-	uint8_t length;
+
+	uint8_t len;
+
+	struct pdu_cis_vnd_octet3 octet3;
+
 	uint8_t payload[0];
 } __packed;
 
@@ -983,7 +1116,11 @@ struct pdu_bis {
 	uint8_t cssn:3;
 	uint8_t ll_id:2;
 #endif /* CONFIG_LITTLE_ENDIAN */
+
 	uint8_t len;
+
+	struct pdu_bis_vnd_octet3 octet3;
+
 	union {
 		uint8_t payload[0];
 		struct pdu_big_ctrl ctrl;
@@ -1068,13 +1205,11 @@ struct pdu_dtm {
 	uint8_t rfu0:1;
 	uint8_t type:4;
 #endif /* CONFIG_LITTLE_ENDIAN */
-	uint8_t length;
-#if defined(CONFIG_BT_CTLR_DF_CTE_TX)
-	union {
-		uint8_t resv; /* TODO: remove nRF specific code */
-		struct pdu_cte_info cte_info; /* BT 5.1 Core spec. CTEInfo storage */
-	};
-#endif
+
+	uint8_t len;
+
+	struct pdu_data_vnd_octet3 octet3;
+
 	uint8_t payload[0];
 } __packed;
 

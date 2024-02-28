@@ -7,12 +7,10 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_INA23X_COMMON_H_
 #define ZEPHYR_DRIVERS_SENSOR_INA23X_COMMON_H_
 
-#include <zephyr/drivers/i2c.h>
+#include <stdint.h>
 
-/**
- * @brief Macro used to test if the current's sign bit is set
- */
-#define INA23X_CURRENT_SIGN_BIT        BIT(15)
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/sys/util_macro.h>
 
 /**
  * @brief Macro used to check if the current's LSB is 1mA

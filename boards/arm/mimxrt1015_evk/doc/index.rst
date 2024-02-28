@@ -51,6 +51,19 @@ these references:
 - `MIMXRT1015-EVK Quick Reference Guide`_
 - `MIMXRT1015-EVK Design Files`_
 
+External Memory
+===============
+
+This platform has the following external memories:
+
++--------------------+------------+-------------------------------------+
+| Device             | Controller | Status                              |
++====================+============+=====================================+
+| AT25SF128A         | FLEXSPI    | Enabled via flash configurationn    |
+|                    |            | block, which sets up FLEXSPI at     |
+|                    |            | boot time.                          |
++--------------------+------------+-------------------------------------+
+
 Supported Features
 ==================
 
@@ -131,8 +144,13 @@ The MIMXRT1015 SoC has five pairs of pinmux/gpio controllers.
 System Clock
 ============
 
-The MIMXRT1015 SoC is configured to use the 32 KHz low frequency oscillator on
-the board as a source for the GPT timer to generate a system clock.
+The MIMXRT1015 SoC is configured to use SysTick as the system clock source,
+running at 500MHz.
+
+When power management is enabled, the 32 KHz low frequency
+oscillator on the board will be used as a source for the GPT timer to
+generate a system clock. This clock enables lower power states, at the
+cost of reduced resolution
 
 Serial Port
 ===========
@@ -150,13 +168,26 @@ Configuring a Debug Probe
 =========================
 
 A debug probe is used for both flashing and debugging the board. This board is
-configured by default to use the :ref:`opensda-daplink-onboard-debug-probe`,
-however the :ref:`pyocd-debug-host-tools` do not yet support programming the
-external flashes on this board so you must reconfigure the board for one of the
-following debug probes instead.
+configured by default to use the :ref:`opensda-daplink-onboard-debug-probe`.
 
-:ref:`jlink-external-debug-probe`
--------------------------------------------
+Using LinkServer: :ref:`opensda-daplink-onboard-debug-probe`
+------------------------------------------------------------
+
+Install the :ref:`linkserver-debug-host-tools` and make sure they are in your
+search path.  LinkServer works with the default CMSIS-DAP firmware included in
+the on-board debugger.
+
+Linkserver is the default runner. You may also se the ``-r linkserver`` option
+with West to use the LinkServer runner.
+
+.. code-block:: console
+
+   west flash
+   west debug
+
+
+External JLink: :ref:`jlink-external-debug-probe`
+-------------------------------------------------
 
 Install the :ref:`jlink-debug-host-tools` and make sure they are in your search
 path.

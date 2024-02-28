@@ -71,17 +71,17 @@ enum {
 };
 
 enum {
-	/* +/-6.144V range = Gain 2/3 */
+	/* +/-6.144V range = Gain 1/3 */
 	ADS1X1X_CONFIG_PGA_6144 = 0,
-	/* +/-4.096V range = Gain 1 */
+	/* +/-4.096V range = Gain 1/2 */
 	ADS1X1X_CONFIG_PGA_4096 = 1,
-	/* +/-2.048V range = Gain 2 (default) */
+	/* +/-2.048V range = Gain 1 (default) */
 	ADS1X1X_CONFIG_PGA_2048 = 2,
-	/* +/-1.024V range = Gain 4 */
+	/* +/-1.024V range = Gain 2 */
 	ADS1X1X_CONFIG_PGA_1024 = 3,
-	/* +/-0.512V range = Gain 8 */
+	/* +/-0.512V range = Gain 4 */
 	ADS1X1X_CONFIG_PGA_512 = 4,
-	/* +/-0.256V range = Gain 16 */
+	/* +/-0.256V range = Gain 8 */
 	ADS1X1X_CONFIG_PGA_256 = 5
 };
 
@@ -140,7 +140,7 @@ struct ads1x1x_data {
 	struct k_thread thread;
 	bool differential;
 
-	K_THREAD_STACK_MEMBER(stack, CONFIG_ADC_ADS1X1X_ACQUISITION_THREAD_STACK_SIZE);
+	K_KERNEL_STACK_MEMBER(stack, CONFIG_ADC_ADS1X1X_ACQUISITION_THREAD_STACK_SIZE);
 };
 
 static int ads1x1x_read_reg(const struct device *dev, enum ads1x1x_reg reg_addr, uint16_t *buf)
@@ -185,12 +185,16 @@ static int ads1x1x_start_conversion(const struct device *dev)
 {
 	/* send start sampling command */
 	uint16_t config;
+	int ret;
 
-	ads1x1x_read_reg(dev, ADS1X1X_REG_CONFIG, &config);
+	ret = ads1x1x_read_reg(dev, ADS1X1X_REG_CONFIG, &config);
+	if (ret != 0) {
+		return ret;
+	}
 	config |= ADS1X1X_CONFIG_OS;
-	ads1x1x_write_reg(dev, ADS1X1X_REG_CONFIG, config);
+	ret = ads1x1x_write_reg(dev, ADS1X1X_REG_CONFIG, config);
 
-	return 0;
+	return ret;
 }
 
 static inline int ads1x1x_acq_time_to_dr(const struct device *dev, uint16_t acq_time)
@@ -361,22 +365,22 @@ static int ads1x1x_channel_setup(const struct device *dev,
 	if (ads_config->pga) {
 		/* programmable gain amplifier support */
 		switch (channel_cfg->gain) {
-		case ADC_GAIN_2_3:
+		case ADC_GAIN_1_3:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_6144);
 			break;
-		case ADC_GAIN_1:
+		case ADC_GAIN_1_2:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_4096);
 			break;
-		case ADC_GAIN_2:
+		case ADC_GAIN_1:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_2048);
 			break;
-		case ADC_GAIN_4:
+		case ADC_GAIN_2:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_1024);
 			break;
-		case ADC_GAIN_8:
+		case ADC_GAIN_4:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_512);
 			break;
-		case ADC_GAIN_16:
+		case ADC_GAIN_8:
 			config |= ADS1X1X_CONFIG_PGA(ADS1X1X_CONFIG_PGA_256);
 			break;
 		default:
@@ -458,11 +462,19 @@ static void adc_context_update_buffer_pointer(struct adc_context *ctx, bool repe
 static void adc_context_start_sampling(struct adc_context *ctx)
 {
 	struct ads1x1x_data *data = CONTAINER_OF(ctx, struct ads1x1x_data, ctx);
+	int ret;
 
 	data->repeat_buffer = data->buffer;
 
-	ads1x1x_start_conversion(data->dev);
-
+	ret = ads1x1x_start_conversion(data->dev);
+	if (ret != 0) {
+		/* if we fail to complete the I2C operations to start
+		 * sampling, return an immediate error (likely -EIO) rather
+		 * than handing it off to the acquisition thread.
+		 */
+		adc_context_complete(ctx, ret);
+		return;
+	}
 	k_sem_give(&data->acq_sem);
 }
 
@@ -525,8 +537,12 @@ static int ads1x1x_read(const struct device *dev, const struct adc_sequence *seq
 	return ads1x1x_adc_read_async(dev, sequence, NULL);
 }
 
-static void ads1x1x_acquisition_thread(const struct device *dev)
+static void ads1x1x_acquisition_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	const struct device *dev = p1;
 	struct ads1x1x_data *data = dev->data;
 	int rc;
 
@@ -537,7 +553,7 @@ static void ads1x1x_acquisition_thread(const struct device *dev)
 		if (rc != 0) {
 			LOG_ERR("failed to get ready status (err %d)", rc);
 			adc_context_complete(&data->ctx, rc);
-			break;
+			continue;
 		}
 
 		ads1x1x_adc_perform_read(dev);
@@ -558,9 +574,9 @@ static int ads1x1x_init(const struct device *dev)
 		return -ENODEV;
 	}
 
-	const k_tid_t tid =
+	k_tid_t tid =
 		k_thread_create(&data->thread, data->stack, K_THREAD_STACK_SIZEOF(data->stack),
-				(k_thread_entry_t)ads1x1x_acquisition_thread, (void *)dev, NULL,
+				ads1x1x_acquisition_thread, (void *)dev, NULL,
 				NULL, CONFIG_ADC_ADS1X1X_ACQUISITION_THREAD_PRIO, 0, K_NO_WAIT);
 	k_thread_name_set(tid, "adc_ads1x1x");
 
@@ -572,7 +588,7 @@ static int ads1x1x_init(const struct device *dev)
 static const struct adc_driver_api ads1x1x_api = {
 	.channel_setup = ads1x1x_channel_setup,
 	.read = ads1x1x_read,
-	.ref_internal = 4096,
+	.ref_internal = 2048,
 #ifdef CONFIG_ADC_ASYNC
 	.read_async = ads1x1x_adc_read_async,
 #endif

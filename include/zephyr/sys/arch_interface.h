@@ -6,6 +6,7 @@
 
 /**
  * @defgroup arch-interface Architecture Interface
+ * @ingroup internal_api
  * @brief Internal kernel APIs with public scope
  *
  * Any public kernel APIs that are implemented as inline functions and need to
@@ -52,16 +53,32 @@ typedef void (*k_thread_entry_t)(void *p1, void *p2, void *p3);
  */
 
 /**
- * Obtain the current cycle count, in units that are hardware-specific
+ * Obtain the current cycle count, in units specified by
+ * CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC.  While this is historically
+ * specified as part of the architecture API, in practice virtually
+ * all platforms forward it to the sys_clock_cycle_get_32() API
+ * provided by the timer driver.
  *
  * @see k_cycle_get_32()
+ *
+ * @return The current cycle time.  This should count up monotonically
+ * through the full 32 bit space, wrapping at 0xffffffff.  Hardware
+ * with fewer bits of precision in the timer is expected to synthesize
+ * a 32 bit count.
  */
 static inline uint32_t arch_k_cycle_get_32(void);
 
 /**
- * Obtain the current cycle count, in units that are hardware-specific
+ * As for arch_k_cycle_get_32(), but with a 64 bit return value.  Not
+ * all timer hardware has a 64 bit timer, this needs to be implemented
+ * only if CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER is set.
  *
- * @see k_cycle_get_64()
+ * @see arch_k_cycle_get_32()
+ *
+ * @return The current cycle time.  This should count up monotonically
+ * through the full 64 bit space, wrapping at 2^64-1.  Hardware with
+ * fewer bits of precision in the timer is generally not expected to
+ * implement this API.
  */
 static inline uint64_t arch_k_cycle_get_64(void);
 
@@ -199,7 +216,7 @@ void arch_cpu_atomic_idle(unsigned int key);
  *
  * @param data context parameter, implementation specific
  */
-typedef FUNC_NORETURN void (*arch_cpustart_t)(void *data);
+typedef void (*arch_cpustart_t)(void *data);
 
 /**
  * @brief Start a numbered CPU on a MP-capable system
@@ -306,6 +323,24 @@ int arch_irq_is_enabled(unsigned int irq);
 int arch_irq_connect_dynamic(unsigned int irq, unsigned int priority,
 			     void (*routine)(const void *parameter),
 			     const void *parameter, uint32_t flags);
+
+/**
+ * Arch-specific hook to dynamically uninstall a shared interrupt.
+ * If the interrupt is not being shared, then the associated
+ * _sw_isr_table entry will be replaced by (NULL, z_irq_spurious)
+ * (default entry).
+ *
+ * @param irq IRQ line number
+ * @param priority Interrupt priority
+ * @param routine Interrupt service routine
+ * @param parameter ISR parameter
+ * @param flags Arch-specific IRQ configuration flag
+ *
+ * @return 0 in case of success, negative value otherwise
+ */
+int arch_irq_disconnect_dynamic(unsigned int irq, unsigned int priority,
+				void (*routine)(const void *parameter),
+				const void *parameter, uint32_t flags);
 
 /**
  * @def ARCH_IRQ_CONNECT(irq, pri, isr, arg, flags)
@@ -460,6 +495,9 @@ static inline uint32_t arch_proc_id(void);
  */
 void arch_sched_ipi(void);
 
+
+int arch_smp_init(void);
+
 #endif /* CONFIG_SMP */
 
 /**
@@ -482,6 +520,8 @@ static inline unsigned int arch_num_cpus(void);
  */
 
 #ifdef CONFIG_USERSPACE
+#include <zephyr/arch/syscall.h>
+
 /**
  * Invoke a system call with 0 arguments.
  *
@@ -496,7 +536,7 @@ static inline unsigned int arch_num_cpus(void);
  * should be enabled when invoking the system call marshallers from the
  * dispatch table. Thread preemption may occur when handling system calls.
  *
- * Call ids are untrusted and must be bounds-checked, as the value is used to
+ * Call IDs are untrusted and must be bounds-checked, as the value is used to
  * index the system call dispatch table, containing function pointers to the
  * specific system call code.
  *
@@ -607,7 +647,7 @@ static inline uintptr_t arch_syscall_invoke6(uintptr_t arg1, uintptr_t arg2,
 /**
  * Indicate whether we are currently running in user mode
  *
- * @return true if the CPU is currently running with user permissions
+ * @return True if the CPU is currently running with user permissions
  */
 static inline bool arch_is_user_context(void);
 
@@ -734,11 +774,11 @@ int arch_mem_domain_partition_add(struct k_mem_domain *domain,
  * if the supplied memory buffer spans multiple enabled memory management
  * regions (even if all such regions permit user access).
  *
- * @warning 0 size buffer has undefined behavior.
+ * @warning Buffer of size zero (0) has undefined behavior.
  *
  * @param addr start address of the buffer
  * @param size the size of the buffer
- * @param write If nonzero, additionally check if the area is writable.
+ * @param write If non-zero, additionally check if the area is writable.
  *	  Otherwise, just check if the memory can be read.
  *
  * @return nonzero if the permissions don't match.
@@ -753,15 +793,17 @@ int arch_buffer_validate(void *addr, size_t size, int write);
  * This call returns the optimal virtual address alignment in order to permit
  * such optimization in the following MMU mapping call.
  *
- * @param[in] phys Physical address of region to be mapped, aligned to MMU_PAGE_SIZE
- * @param[in] size Size of region to be mapped, aligned to MMU_PAGE_SIZE
+ * @param[in] phys Physical address of region to be mapped,
+ *                 aligned to @kconfig{CONFIG_MMU_PAGE_SIZE}
+ * @param[in] size Size of region to be mapped,
+ *                 aligned to @kconfig{CONFIG_MMU_PAGE_SIZE}
  *
- * @retval alignment to apply on the virtual address of this region
+ * @return Alignment to apply on the virtual address of this region
  */
 size_t arch_virt_region_align(uintptr_t phys, size_t size);
 
 /**
- * Perform a one-way transition from supervisor to kernel mode.
+ * Perform a one-way transition from supervisor to user mode.
  *
  * Implementations of this function must do the following:
  *
@@ -800,9 +842,9 @@ FUNC_NORETURN void arch_syscall_oops(void *ssf);
 /**
  * @brief Safely take the length of a potentially bad string
  *
- * This must not fault, instead the err parameter must have -1 written to it.
+ * This must not fault, instead the @p err parameter must have -1 written to it.
  * This function otherwise should work exactly like libc strnlen(). On success
- * *err should be set to 0.
+ * @p err should be set to 0.
  *
  * @param s String to measure
  * @param maxsize Max length of the string
@@ -864,15 +906,15 @@ static inline bool arch_mem_coherent(void *ptr)
  * is not sufficient on many architectures and coordination with the
  * arch_switch() implementation is likely required.
  *
- * @arg old_thread The old thread to be flushed before being allowed
- *                 to run on other CPUs.
- * @arg old_switch_handle The switch handle to be stored into
- *                        old_thread (it will not be valid until the
- *                        cache is flushed so is not present yet).
- *                        This will be NULL if inside z_swap()
- *                        (because the arch_switch() has not saved it
- *                        yet).
- * @arg new_thread The new thread to be invalidated before it runs locally.
+ * @param old_thread The old thread to be flushed before being allowed
+ *                   to run on other CPUs.
+ * @param old_switch_handle The switch handle to be stored into
+ *                          old_thread (it will not be valid until the
+ *                          cache is flushed so is not present yet).
+ *                          This will be NULL if inside z_swap()
+ *                          (because the arch_switch() has not saved it
+ *                          yet).
+ * @param new_thread The new thread to be invalidated before it runs locally.
  */
 #ifndef CONFIG_KERNEL_COHERENCE
 static inline void arch_cohere_stacks(struct k_thread *old_thread,
@@ -1014,117 +1056,17 @@ int arch_gdb_remove_breakpoint(struct gdb_ctx *ctx, uint8_t type,
 #endif
 /** @} */
 
-/**
- * @defgroup arch_cache Architecture-specific cache functions
- * @ingroup arch-interface
- * @{
- */
-
-#if defined(CONFIG_CACHE_MANAGEMENT) && defined(CONFIG_HAS_ARCH_CACHE)
-
-#if defined(CONFIG_DCACHE)
-
-/**
- *
- * @brief Enable d-cache
- *
- * @see arch_dcache_enable
- */
-void arch_dcache_enable(void);
-
-/**
- *
- * @brief Disable d-cache
- *
- * @see arch_dcache_disable
- */
-void arch_dcache_disable(void);
-
-/**
- *
- * @brief Write-back / Invalidate / Write-back + Invalidate all d-cache
- *
- * @see arch_dcache_all
- */
-int arch_dcache_all(int op);
-
-/**
- *
- * @brief Write-back / Invalidate / Write-back + Invalidate d-cache lines
- *
- * @see arch_dcache_range
- */
-int arch_dcache_range(void *addr, size_t size, int op);
-
-#if defined(CONFIG_DCACHE_LINE_SIZE_DETECT)
-/**
- *
- * @brief Get d-cache line size
- *
- * @see sys_cache_data_line_size_get
- */
-size_t arch_dcache_line_size_get(void);
-#endif /* CONFIG_DCACHE_LINE_SIZE_DETECT */
-
-#endif /* CONFIG_DCACHE */
-
-#if defined(CONFIG_ICACHE)
-
-/**
- *
- * @brief Enable i-cache
- *
- * @see arch_icache_enable
- */
-void arch_icache_enable(void);
-
-/**
- *
- * @brief Enable i-cache
- *
- * @see arch_icache_disable
- */
-void arch_icache_disable(void);
-
-
-/**
- *
- * @brief Write-back / Invalidate / Write-back + Invalidate all i-cache
- *
- * @see arch_icache_all
- */
-int arch_icache_all(int op);
-
-/**
- *
- * @brief Write-back / Invalidate / Write-back + Invalidate i-cache lines
- *
- * @see arch_icache_range
- */
-int arch_icache_range(void *addr, size_t size, int op);
-
-
-#if defined(CONFIG_ICACHE_LINE_SIZE_DETECT)
-/**
- *
- * @brief Get i-cache line size
- *
- * @see sys_cache_instr_line_size_get
- */
-size_t arch_icache_line_size_get(void);
-#endif /* CONFIG_ICACHE_LINE_SIZE_DETECT */
-
-#endif /* CONFIG_ICACHE */
-
-#endif /* CONFIG_CACHE_MANAGEMENT && CONFIG_HAS_ARCH_CACHE */
-
-/** @} */
-
 #ifdef CONFIG_TIMING_FUNCTIONS
 #include <zephyr/timing/types.h>
 
 /**
- * @ingroup arch-timing
+ * @brief Arch specific Timing Measurement APIs
+ * @defgroup timing_api_arch Arch specific Timing Measurement APIs
+ * @ingroup timing_api
+ *
+ * Implements the necessary bits to support timing measurement
+ * using architecture specific timing measurement mechanism.
+ *
  * @{
  */
 
@@ -1168,16 +1110,24 @@ void arch_timing_stop(void);
 /**
  * @brief Return timing counter.
  *
+ * @parblock
+ *
  * @note Any call to arch_timing_counter_get() must be done between
  * calls to arch_timing_start() and arch_timing_stop(), and on the
  * same CPU core.
  *
- * @note Not all platforms have a timing counter with 64 bit precision.  It
- * is possible to see this value "go backwards" due to internal
+ * @endparblock
+ *
+ * @parblock
+ *
+ * @note Not all architectures have a timing counter with 64 bit precision.
+ * It is possible to see this value "go backwards" due to internal
  * rollover.  Timing code must be prepared to address the rollover
  * (with platform-dependent code, e.g. by casting to a uint32_t before
  * subtraction) or by using arch_timing_cycles_get() which is required
  * to understand the distinction.
+ *
+ * @endparblock
  *
  * @return Timing counter.
  *
@@ -1188,7 +1138,7 @@ timing_t arch_timing_counter_get(void);
 /**
  * @brief Get number of cycles between @p start and @p end.
  *
- * For some architectures or SoCs, the raw numbers from counter need
+ * @note For some architectures, the raw numbers from counter need
  * to be scaled to obtain actual number of cycles, or may roll over
  * internally.  This function computes a positive-definite interval
  * between two returned cycle values.
@@ -1279,6 +1229,16 @@ bool arch_pcie_msi_vector_connect(msi_vector_t *vector,
 				  uint32_t flags);
 
 #endif /* CONFIG_PCIE_MSI_MULTI_VECTOR */
+
+/**
+ * @brief Perform architecture specific processing within spin loops
+ *
+ * This is invoked from busy loops with IRQs disabled such as the contended
+ * spinlock loop. The default implementation is a weak function that calls
+ * arch_nop(). Architectures may implement this function to perform extra
+ * checks or power management tricks if needed.
+ */
+void arch_spin_relax(void);
 
 #ifdef __cplusplus
 }

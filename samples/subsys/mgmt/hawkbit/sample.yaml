@@ -1,5 +1,5 @@
 common:
-  filter: TOOLCHAIN_HAS_NEWLIB == 1
+  filter: CONFIG_FULL_LIBC_SUPPORTED
 sample:
   description: Hawkbit Firmware Over-the-Air (FOTA)
   name: hawkbit
@@ -10,3 +10,5 @@ tests:
     depends_on: netif
     build_only: true
     platform_allow: frdm_k64f
+    integration_platforms:
+      - frdm_k64f

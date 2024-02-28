@@ -3,14 +3,15 @@
 Devicetree API
 ##############
 
-This is a reference page for the ``<devicetree.h>`` API. The API is macro
+This is a reference page for the ``<zephyr/devicetree.h>`` API. The API is macro
 based. Use of these macros has no impact on scheduling. They can be used from
 any calling context and at file scope.
 
-Some of these require a special macro named ``DT_DRV_COMPAT`` to be defined
-before they can be used; these are discussed individually below. These macros
-are generally meant for use within :ref:`device drivers <device_model_api>`,
-though they can be used outside of drivers with appropriate care.
+Some of these -- the ones beginning with ``DT_INST_`` -- require a special
+macro named ``DT_DRV_COMPAT`` to be defined before they can be used; these are
+discussed individually below. These macros are generally meant for use within
+:ref:`device drivers <device_model_api>`, though they can be used outside of
+drivers with appropriate care.
 
 .. contents:: Contents
    :local:
@@ -139,6 +140,7 @@ depends on" relation:
 - a node directly depends on any nodes its properties refer to by phandle
 - a node directly depends on its ``interrupt-parent`` if it has an
   ``interrupts`` property
+- a parent node inherits all dependencies from its child nodes
 
 A *dependency ordering* of a devicetree is a list of its nodes, where each node
 ``n`` appears earlier in the list than any nodes that depend on ``n``. A node's
@@ -359,12 +361,6 @@ identifier for a chosen node.
 .. doxygengroup:: devicetree-generic-chosen
    :project: Zephyr
 
-There are also conveniences for commonly used zephyr-specific properties of the
-``/chosen`` node.
-
-.. doxygengroup:: devicetree-zephyr
-   :project: Zephyr
-
 Zephyr-specific chosen nodes
 ****************************
 
@@ -428,6 +424,9 @@ device.
        interprocess-communication (IPC)
    * - zephyr,itcm
      - Instruction Tightly Coupled Memory node on some Arm SoCs
+   * - zephyr,log-uart
+     - Sets the UART device(s) used by the logging subsystem's UART backend.
+       If defined, the UART log backend would output to the devices listed in this node.
    * - zephyr,ocm
      - On-chip memory node on Xilinx Zynq-7000 and ZynqMP SoCs
    * - zephyr,osdp-uart

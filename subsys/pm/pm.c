@@ -6,9 +6,10 @@
 
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
-#include <zephyr/timeout_q.h>
+#include <zephyr/kernel_structs.h>
 #include <zephyr/init.h>
 #include <string.h>
+#include <zephyr/drivers/timer/system_timer.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/device_runtime.h>
 #include <zephyr/pm/pm.h>
@@ -20,9 +21,6 @@
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(pm, CONFIG_PM_LOG_LEVEL);
-
-#define CURRENT_CPU \
-	(COND_CODE_1(CONFIG_SMP, (arch_curr_cpu()->id), (_current_cpu->id)))
 
 static ATOMIC_DEFINE(z_post_ops_required, CONFIG_MP_MAX_NUM_CPUS);
 static sys_slist_t pm_notifiers = SYS_SLIST_STATIC_INIT(&pm_notifiers);
@@ -42,15 +40,10 @@ static struct pm_state_info z_cpus_pm_forced_state[] = {
 };
 
 static struct k_spinlock pm_forced_state_lock;
-
-#if defined(CONFIG_PM_DEVICE) && !defined(CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE)
-static atomic_t z_cpus_active = ATOMIC_INIT(CONFIG_MP_MAX_NUM_CPUS);
-#endif
 static struct k_spinlock pm_notifier_lock;
 
-
 #ifdef CONFIG_PM_DEVICE
-extern const struct device *__pm_device_slots_start[];
+TYPE_SECTION_START_EXTERN(const struct device *, pm_device_slots);
 
 #if !defined(CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE)
 /* Number of devices successfully suspended. */
@@ -69,12 +62,13 @@ static int pm_suspend_devices(void)
 		int ret;
 
 		/*
-		 * ignore busy devices, wake up source and devices with
-		 * runtime PM enabled.
+		 * Ignore uninitialized devices, busy devices, wake up sources, and
+		 * devices with runtime PM enabled.
 		 */
-		if (pm_device_is_busy(dev) || pm_device_state_is_locked(dev)
-		    || pm_device_wakeup_is_enabled(dev) ||
-		    ((dev->pm != NULL) && pm_device_runtime_is_enabled(dev))) {
+		if (!device_is_ready(dev) || pm_device_is_busy(dev) ||
+		    pm_device_state_is_locked(dev) ||
+		    pm_device_wakeup_is_enabled(dev) ||
+		    pm_device_runtime_is_enabled(dev)) {
 			continue;
 		}
 
@@ -90,7 +84,7 @@ static int pm_suspend_devices(void)
 			return ret;
 		}
 
-		__pm_device_slots_start[num_susp] = dev;
+		TYPE_SECTION_START(pm_device_slots)[num_susp] = dev;
 		num_susp++;
 	}
 
@@ -100,7 +94,7 @@ static int pm_suspend_devices(void)
 static void pm_resume_devices(void)
 {
 	for (int i = (num_susp - 1); i >= 0; i--) {
-		pm_device_action_run(__pm_device_slots_start[i],
+		pm_device_action_run(TYPE_SECTION_START(pm_device_slots)[i],
 				    PM_DEVICE_ACTION_RESUME);
 	}
 
@@ -108,35 +102,6 @@ static void pm_resume_devices(void)
 }
 #endif  /* !CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE */
 #endif	/* CONFIG_PM_DEVICE */
-
-static inline void pm_exit_pos_ops(struct pm_state_info *info)
-{
-	extern __weak void
-		pm_state_exit_post_ops(enum pm_state state, uint8_t substate_id);
-
-	if (pm_state_exit_post_ops != NULL) {
-		pm_state_exit_post_ops(info->state, info->substate_id);
-	} else {
-		/*
-		 * This function is supposed to be overridden to do SoC or
-		 * architecture specific post ops after sleep state exits.
-		 *
-		 * The kernel expects that irqs are unlocked after this.
-		 */
-
-		irq_unlock(0);
-	}
-}
-
-static inline void state_set(struct pm_state_info *info)
-{
-	extern __weak void
-		pm_state_set(enum pm_state state, uint8_t substate_id);
-
-	if (pm_state_set != NULL) {
-		pm_state_set(info->state, info->substate_id);
-	}
-}
 
 /*
  * Function called to notify when the system is entering / exiting a
@@ -165,7 +130,7 @@ static inline void pm_state_notify(bool entering_state)
 
 void pm_system_resume(void)
 {
-	uint8_t id = CURRENT_CPU;
+	uint8_t id = _current_cpu->id;
 
 	/*
 	 * This notification is called from the ISR of the event
@@ -180,7 +145,7 @@ void pm_system_resume(void)
 	 * and it may schedule another thread.
 	 */
 	if (atomic_test_and_clear_bit(z_post_ops_required, id)) {
-		pm_exit_pos_ops(&z_cpus_pm_state[id]);
+		pm_state_exit_post_ops(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
 		pm_state_notify(false);
 		z_cpus_pm_state[id] = (struct pm_state_info){PM_STATE_ACTIVE,
 			0, 0};
@@ -203,7 +168,7 @@ bool pm_state_force(uint8_t cpu, const struct pm_state_info *info)
 
 bool pm_system_suspend(int32_t ticks)
 {
-	uint8_t id = CURRENT_CPU;
+	uint8_t id = _current_cpu->id;
 	k_spinlock_key_t key;
 
 	SYS_PORT_TRACING_FUNC_ENTER(pm, system_suspend, ticks);
@@ -229,30 +194,32 @@ bool pm_system_suspend(int32_t ticks)
 		return false;
 	}
 
+#if defined(CONFIG_PM_DEVICE) && !defined(CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE)
+	if (atomic_sub(&_cpus_active, 1) == 1) {
+		if (z_cpus_pm_state[id].state != PM_STATE_RUNTIME_IDLE) {
+			if (pm_suspend_devices()) {
+				pm_resume_devices();
+				z_cpus_pm_state[id].state = PM_STATE_ACTIVE;
+				(void)atomic_add(&_cpus_active, 1);
+				SYS_PORT_TRACING_FUNC_EXIT(pm, system_suspend, ticks,
+							   z_cpus_pm_state[id].state);
+				return false;
+			}
+		}
+	}
+#endif
+
 	if (ticks != K_TICKS_FOREVER) {
 		/*
 		 * We need to set the timer to interrupt a little bit early to
 		 * accommodate the time required by the CPU to fully wake up.
 		 */
-		z_set_timeout_expiry(ticks -
+		sys_clock_set_timeout(ticks -
 		     k_us_to_ticks_ceil32(
 			     z_cpus_pm_state[id].exit_latency_us),
 				     true);
 	}
 
-#if defined(CONFIG_PM_DEVICE) && !defined(CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE)
-	if ((z_cpus_pm_state[id].state != PM_STATE_RUNTIME_IDLE) &&
-			(atomic_sub(&z_cpus_active, 1) == 1)) {
-		if (pm_suspend_devices()) {
-			pm_resume_devices();
-			z_cpus_pm_state[id].state = PM_STATE_ACTIVE;
-			(void)atomic_add(&z_cpus_active, 1);
-			SYS_PORT_TRACING_FUNC_EXIT(pm, system_suspend, ticks,
-						   z_cpus_pm_state[id].state);
-			return false;
-		}
-	}
-#endif
 	/*
 	 * This function runs with interruptions locked but it is
 	 * expected the SoC to unlock them in
@@ -267,12 +234,12 @@ bool pm_system_suspend(int32_t ticks)
 	/* Enter power state */
 	pm_state_notify(true);
 	atomic_set_bit(z_post_ops_required, id);
-	state_set(&z_cpus_pm_state[id]);
+	pm_state_set(z_cpus_pm_state[id].state, z_cpus_pm_state[id].substate_id);
 	pm_stats_stop();
 
 	/* Wake up sequence starts here */
 #if defined(CONFIG_PM_DEVICE) && !defined(CONFIG_PM_DEVICE_RUNTIME_EXCLUSIVE)
-	if (atomic_add(&z_cpus_active, 1) == 0) {
+	if (atomic_add(&_cpus_active, 1) == 0) {
 		pm_resume_devices();
 	}
 #endif

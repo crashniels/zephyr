@@ -12,6 +12,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 #include <string.h>
+#include <zephyr/posix/unistd.h>
 #include <getopt.h>
 
 ZTEST_SUITE(getopt_test_suite, NULL, NULL, NULL, NULL, NULL);

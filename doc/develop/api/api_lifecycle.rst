@@ -41,7 +41,7 @@ Peripheral APIs (Hardware Related)
 
 When introducing an API (public header file with documentation) for a new
 peripheral or driver subsystem, review of the API is enforced and is driven by
-the API working group consisting of representatives from different vendors.
+the Architecture working group consisting of representatives from different vendors.
 
 The API shall be promoted to ``unstable`` when it has at least two
 implementations on different hardware platforms.
@@ -94,23 +94,23 @@ In order to declare an API ``stable``, the following steps need to be followed:
    `Zephyr Architecture meeting`_ where, barring any objections, the Pull Request
    will be merged
 
-.. _stable_api_changes:
+.. _breaking_api_changes:
 
-Introducing incompatible changes
+Introducing breaking API changes
 ================================
 
-A stable API, as described above strives to remain backwards-compatible through
+A stable API, as described above, strives to remain backwards-compatible through
 its life-cycle. There are however cases where fulfilling this objective prevents
-technical progress or is simply unfeasible without unreasonable burden on the
+technical progress, or is simply unfeasible without unreasonable burden on the
 maintenance of the API and its implementation(s).
 
-An incompatible change is defined as one that forces users to modify their
+A breaking API change is defined as one that forces users to modify their
 existing code in order to maintain the current behavior of their application.
 The need for recompilation of applications (without changing the application
-itself) is not considered an incompatible change.
+itself) is not considered a breaking API change.
 
 In order to restrict and control the introduction of a change that breaks the
-promise of backwards compatibility the following steps must be followed whenever
+promise of backwards compatibility, the following steps must be followed whenever
 such a change is considered necessary in order to accept it in the project:
 
 #. An :ref:`RFC issue <rfcs>` must be opened on GitHub with the following
@@ -118,7 +118,7 @@ such a change is considered necessary in order to accept it in the project:
 
    .. code-block:: none
 
-      Title:     RFC: API Change: <subsystem>
+      Title:     RFC: Breaking API Change: <subsystem>
       Contents:  - Problem Description:
                    - Background information on why the change is required
                  - Proposed Change (detailed):
@@ -133,7 +133,7 @@ such a change is considered necessary in order to accept it in the project:
 
    Instead of a written description of the changes, the RFC issue may link to a
    Pull Request containing those changes in code form.
-#. The RFC issue must be labeled with the GitHub ``Stable API Change`` label
+#. The RFC issue must be labeled with the GitHub ``Breaking API Change`` label
 #. The RFC issue must be submitted for discussion in the next `Zephyr
    Architecture meeting`_
 #. An email must be sent to the ``devel`` mailing list with a subject identical
@@ -164,7 +164,7 @@ The Pull Request must include the following:
   the corresponding maintainers
 - An entry in the "API Changes" section of the release notes for the next
   upcoming release
-- The labels ``API``, ``Stable API Change`` and ``Release Notes``, as well as
+- The labels ``API``, ``Breaking API Change`` and ``Release Notes``, as well as
   any others that are applicable
 
 Once the steps above have been completed, the outcome of the proposal will
@@ -177,8 +177,7 @@ If the Pull Request is merged then an email must be sent to the ``devel`` and
 
 .. note::
 
-   Incompatible changes will be announced in the "API Changes" section of the
-   release notes.
+   Breaking API changes will be listed and described in the migration guide.
 
 Deprecated
 ***********
@@ -195,7 +194,7 @@ The following are the requirements for deprecating an existing API:
   The API needs to be marked as deprecated in at least two full releases.
   For example, if an API was first deprecated in release 1.14,
   it will be ready to be removed in 1.16 at the earliest.
-  There may be special circumstances, determined by the API working group,
+  There may be special circumstances, determined by the Architecture working group,
   where an API is deprecated sooner.
 - What is required when deprecating:
 

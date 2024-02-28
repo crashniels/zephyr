@@ -15,11 +15,6 @@
 #define TICKER_USER_ID_THREAD   MAYFLY_CALL_ID_PROGRAM
 
 #define EVENT_PIPELINE_MAX 7
-#if defined(CONFIG_BT_CTLR_LOW_LAT_ULL)
-#define EVENT_DONE_LINK_CNT 0
-#else
-#define EVENT_DONE_LINK_CNT 1
-#endif /* CONFIG_BT_CTLR_LOW_LAT_ULL */
 
 #define ADV_INT_UNIT_US      625U
 #define SCAN_INT_UNIT_US     625U
@@ -186,6 +181,9 @@ enum {
 #else /* !CONFIG_BT_CTLR_ADV_ISO && !CONFIG_BT_CTLR_SYNC_ISO */
 #define BT_CTLR_CONN_ISO_STREAM_HANDLE_BASE (CONFIG_BT_MAX_CONN)
 #endif /* !CONFIG_BT_CTLR_ADV_ISO && !CONFIG_BT_CTLR_SYNC_ISO */
+#define LL_CIS_HANDLE_BASE (BT_CTLR_CONN_ISO_STREAM_HANDLE_BASE)
+#define LL_CIS_IDX_FROM_HANDLE(handle) \
+	((handle) - LL_CIS_HANDLE_BASE)
 #endif /* CONFIG_BT_CTLR_CONN_ISO */
 
 #define TICKER_ID_ULL_BASE ((TICKER_ID_LLL_PREEMPT) + 1)
@@ -308,6 +306,7 @@ enum node_rx_type {
 	NODE_RX_TYPE_SCAN_INDICATION,
 	NODE_RX_TYPE_CIS_REQUEST,
 	NODE_RX_TYPE_CIS_ESTABLISHED,
+	NODE_RX_TYPE_REQ_PEER_SCA_COMPLETE,
 	NODE_RX_TYPE_MESH_ADV_CPLT,
 	NODE_RX_TYPE_MESH_REPORT,
 	NODE_RX_TYPE_SYNC_IQ_SAMPLE_REPORT,
@@ -315,6 +314,8 @@ enum node_rx_type {
 	NODE_RX_TYPE_DTM_IQ_SAMPLE_REPORT,
 	NODE_RX_TYPE_IQ_SAMPLE_REPORT_ULL_RELEASE,
 	NODE_RX_TYPE_IQ_SAMPLE_REPORT_LLL_RELEASE,
+	/* Signals retention (ie non-release) of rx node */
+	NODE_RX_TYPE_RETAIN,
 
 #if defined(CONFIG_BT_CTLR_USER_EXT)
 	/* No entries shall be added after the NODE_RX_TYPE_USER_START/END */
@@ -495,18 +496,31 @@ struct event_done_extra {
 #endif /* CONFIG_BT_CTLR_JIT_SCHEDULING */
 	union {
 		struct {
-			uint16_t trx_cnt;
-			uint8_t  crc_valid:1;
+			union {
+#if defined(CONFIG_BT_CTLR_CONN_ISO)
+				uint32_t trx_performed_bitmask;
+#endif /* CONFIG_BT_CTLR_CONN_ISO */
+
+				struct {
+					uint16_t trx_cnt;
+					uint8_t  crc_valid:1;
 #if defined(CONFIG_BT_CTLR_SYNC_PERIODIC_CTE_TYPE_FILTERING) && \
 	defined(CONFIG_BT_CTLR_CTEINLINE_SUPPORT)
-			/* Used to inform ULL that periodic advertising sync scan should be
-			 * terminated.
-			 */
-			uint8_t  sync_term:1;
-#endif /* CONFIG_BT_CTLR_SYNC_PERIODIC_CTE_TYPE_FILTERING && CONFIG_BT_CTLR_CTEINLINE_SUPPORT */
+					/* Used to inform ULL that periodic
+					 * advertising sync scan should be
+					 * terminated.
+					 */
+					uint8_t  sync_term:1;
+#endif /* CONFIG_BT_CTLR_SYNC_PERIODIC_CTE_TYPE_FILTERING && \
+	* CONFIG_BT_CTLR_CTEINLINE_SUPPORT
+	*/
+				};
+			};
+
 #if defined(CONFIG_BT_CTLR_LE_ENC)
 			uint8_t  mic_state;
 #endif /* CONFIG_BT_CTLR_LE_ENC */
+
 #if defined(CONFIG_BT_PERIPHERAL) || defined(CONFIG_BT_CTLR_SYNC_PERIODIC)
 			union {
 				struct event_done_extra_drift drift;
@@ -579,9 +593,8 @@ void *ull_pdu_rx_alloc(void);
 void *ull_iso_pdu_rx_alloc_peek(uint8_t count);
 void *ull_iso_pdu_rx_alloc(void);
 void ull_rx_put(memq_link_t *link, void *rx);
-void ull_rx_put_done(memq_link_t *link, void *done);
 void ull_rx_sched(void);
-void ull_rx_sched_done(void);
+void ull_rx_put_sched(memq_link_t *link, void *rx);
 void ull_iso_rx_put(memq_link_t *link, void *rx);
 void ull_iso_rx_sched(void);
 void *ull_iso_tx_ack_dequeue(void);

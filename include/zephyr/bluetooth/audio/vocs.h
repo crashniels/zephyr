@@ -26,7 +26,10 @@
  * [Experimental] Users should note that the APIs can change as a part of ongoing development.
  */
 
-#include <zephyr/types.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+#include <zephyr/bluetooth/conn.h>
 
 #ifdef __cplusplus
 extern "C" {

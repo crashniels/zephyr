@@ -8,7 +8,7 @@
 #include <zephyr/kernel.h>
 #include <soc.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_types.h>
 
 #include "hal/cpu.h"
 #include "hal/ccm.h"
@@ -19,6 +19,8 @@
 #include "util/mfifo.h"
 #include "util/dbuf.h"
 
+#include "pdu_df.h"
+#include "lll/pdu_vendor.h"
 #include "pdu.h"
 
 #include "lll.h"
@@ -53,9 +55,6 @@
 
 #include "ll.h"
 
-#define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_CTLR_DF_DEBUG_ENABLE)
-#define LOG_MODULE_NAME bt_ctlr_ull_df
-#include "common/log.h"
 #include "hal/debug.h"
 
 #if defined(CONFIG_BT_CTLR_DF_SCAN_CTE_RX) || defined(CONFIG_BT_CTLR_DF_CONN_CTE_RX) || \
@@ -493,8 +492,9 @@ uint8_t ll_df_set_cl_iq_sampling_enable(uint16_t handle,
 			/* Extend sync event by maximum CTE duration.
 			 * CTE duration depends on transmitter configuration
 			 * so it is unknown for receiver upfront.
+			 * BT_HCI_LE_CTE_LEN_MAX is in 8us units.
 			 */
-			slot_plus_us = BT_HCI_LE_CTE_LEN_MAX;
+			slot_plus_us = BT_HCI_LE_CTE_LEN_MAX * 8U;
 		}
 	}
 
@@ -860,18 +860,22 @@ static uint8_t cte_info_set(struct ll_adv_set *adv, struct lll_df_adv_cfg *df_cf
 
 	cte_info.type = df_cfg->cte_type;
 	cte_info.time = df_cfg->cte_length;
+	cte_info.rfu = 0U;
 
 	/* Note: ULL_ADV_PDU_EXTRA_DATA_ALLOC_ALWAYS is just information that extra_data
 	 * is required in case of this ull_adv_sync_pdu_alloc.
 	 */
+	extra_data = NULL;
 	err = ull_adv_sync_pdu_alloc(adv, ULL_ADV_PDU_EXTRA_DATA_ALLOC_ALWAYS, &pdu_prev, &pdu,
 				     NULL, &extra_data, ter_idx);
 	if (err != BT_HCI_ERR_SUCCESS) {
 		return err;
 	}
 
-	ull_adv_sync_extra_data_set_clear(NULL, extra_data, ULL_ADV_PDU_HDR_FIELD_CTE_INFO, 0,
-					  df_cfg);
+	if (extra_data) {
+		ull_adv_sync_extra_data_set_clear(NULL, extra_data, ULL_ADV_PDU_HDR_FIELD_CTE_INFO,
+						  0, df_cfg);
+	}
 
 #if (CONFIG_BT_CTLR_DF_PER_ADV_CTE_NUM_MAX > 1)
 	if (df_cfg->cte_count > 1) {
@@ -1069,13 +1073,15 @@ static uint8_t cte_info_clear(struct ll_adv_set *adv, struct lll_df_adv_cfg *df_
 	/* NOTE: ULL_ADV_PDU_EXTRA_DATA_ALLOC_NEVER is just information that extra_data
 	 * should be removed in case of this call ull_adv_sync_pdu_alloc.
 	 */
+	extra_data_prev = NULL;
+	extra_data = NULL;
 	err = ull_adv_sync_pdu_alloc(adv, ULL_ADV_PDU_EXTRA_DATA_ALLOC_NEVER, &pdu_prev, &pdu,
 				     &extra_data_prev, &extra_data, ter_idx);
 	if (err != BT_HCI_ERR_SUCCESS) {
 		return err;
 	}
 
-	if (extra_data) {
+	if (extra_data_prev && extra_data) {
 		ull_adv_sync_extra_data_set_clear(extra_data_prev, extra_data, 0,
 						  ULL_ADV_PDU_HDR_FIELD_CTE_INFO, NULL);
 	}

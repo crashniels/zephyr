@@ -13,22 +13,29 @@ BUILD_ASSERT(((NRF_PULL_NONE == NRF_GPIO_PIN_NOPULL) &&
 	      (NRF_PULL_UP == NRF_GPIO_PIN_PULLUP)),
 	      "nRF pinctrl pull settings do not match HAL values");
 
-BUILD_ASSERT(((NRF_DRIVE_S0S1 == NRF_GPIO_PIN_S0S1) &&
-	      (NRF_DRIVE_H0S1 == NRF_GPIO_PIN_H0S1) &&
-	      (NRF_DRIVE_S0H1 == NRF_GPIO_PIN_S0H1) &&
-	      (NRF_DRIVE_H0H1 == NRF_GPIO_PIN_H0H1) &&
-	      (NRF_DRIVE_D0S1 == NRF_GPIO_PIN_D0S1) &&
-	      (NRF_DRIVE_D0H1 == NRF_GPIO_PIN_D0H1) &&
-	      (NRF_DRIVE_S0D1 == NRF_GPIO_PIN_S0D1) &&
-	      (NRF_DRIVE_H0D1 == NRF_GPIO_PIN_H0D1) &&
-#if defined(GPIO_PIN_CNF_DRIVE_E0E1)
-	      (NRF_DRIVE_E0E1 == NRF_GPIO_PIN_E0E1) &&
-#endif /* defined(GPIO_PIN_CNF_DRIVE_E0E1) */
-	      (1U)),
-	     "nRF pinctrl drive settings do not match HAL values");
+#if defined(GPIO_PIN_CNF_DRIVE_E0E1) || defined(GPIO_PIN_CNF_DRIVE0_E0)
+#define NRF_DRIVE_COUNT (NRF_DRIVE_E0E1 + 1)
+#else
+#define NRF_DRIVE_COUNT (NRF_DRIVE_H0D1 + 1)
+#endif
+static const nrf_gpio_pin_drive_t drive_modes[NRF_DRIVE_COUNT] = {
+	[NRF_DRIVE_S0S1] = NRF_GPIO_PIN_S0S1,
+	[NRF_DRIVE_H0S1] = NRF_GPIO_PIN_H0S1,
+	[NRF_DRIVE_S0H1] = NRF_GPIO_PIN_S0H1,
+	[NRF_DRIVE_H0H1] = NRF_GPIO_PIN_H0H1,
+	[NRF_DRIVE_D0S1] = NRF_GPIO_PIN_D0S1,
+	[NRF_DRIVE_D0H1] = NRF_GPIO_PIN_D0H1,
+	[NRF_DRIVE_S0D1] = NRF_GPIO_PIN_S0D1,
+	[NRF_DRIVE_H0D1] = NRF_GPIO_PIN_H0D1,
+#if defined(GPIO_PIN_CNF_DRIVE_E0E1) || defined(GPIO_PIN_CNF_DRIVE0_E0)
+	[NRF_DRIVE_E0E1] = NRF_GPIO_PIN_E0E1,
+#endif
+};
 
 /* value to indicate pin level doesn't need initialization */
 #define NO_WRITE UINT32_MAX
+
+#define PSEL_DISCONNECTED 0xFFFFFFFFUL
 
 #if DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_uart)
 #define NRF_PSEL_UART(reg, line) ((NRF_UART_Type *)reg)->PSEL##line
@@ -84,101 +91,108 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 			   uintptr_t reg)
 {
 	for (uint8_t i = 0U; i < pin_cnt; i++) {
-		nrf_gpio_pin_drive_t drive = NRF_GET_DRIVE(pins[i]);
-		uint32_t pin = NRF_GET_PIN(pins[i]);
+		nrf_gpio_pin_drive_t drive;
+		uint8_t drive_idx = NRF_GET_DRIVE(pins[i]);
+		uint32_t psel = NRF_GET_PIN(pins[i]);
 		uint32_t write = NO_WRITE;
 		nrf_gpio_pin_dir_t dir;
 		nrf_gpio_pin_input_t input;
 
-		if (pin == NRF_PIN_DISCONNECTED) {
-			pin = 0xFFFFFFFFU;
+		if (drive_idx < ARRAY_SIZE(drive_modes)) {
+			drive = drive_modes[drive_idx];
+		} else {
+			return -EINVAL;
+		}
+
+		if (psel == NRF_PIN_DISCONNECTED) {
+			psel = PSEL_DISCONNECTED;
 		}
 
 		switch (NRF_GET_FUN(pins[i])) {
 #if defined(NRF_PSEL_UART)
 		case NRF_FUN_UART_TX:
-			NRF_PSEL_UART(reg, TXD) = pin;
+			NRF_PSEL_UART(reg, TXD) = psel;
 			write = 1U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_UART_RX:
-			NRF_PSEL_UART(reg, RXD) = pin;
+			NRF_PSEL_UART(reg, RXD) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_UART_RTS:
-			NRF_PSEL_UART(reg, RTS) = pin;
+			NRF_PSEL_UART(reg, RTS) = psel;
 			write = 1U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_UART_CTS:
-			NRF_PSEL_UART(reg, CTS) = pin;
+			NRF_PSEL_UART(reg, CTS) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* defined(NRF_PSEL_UART) */
 #if defined(NRF_PSEL_SPIM)
 		case NRF_FUN_SPIM_SCK:
-			NRF_PSEL_SPIM(reg, SCK) = pin;
+			NRF_PSEL_SPIM(reg, SCK) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_SPIM_MOSI:
-			NRF_PSEL_SPIM(reg, MOSI) = pin;
+			NRF_PSEL_SPIM(reg, MOSI) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_SPIM_MISO:
-			NRF_PSEL_SPIM(reg, MISO) = pin;
+			NRF_PSEL_SPIM(reg, MISO) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* defined(NRF_PSEL_SPIM) */
 #if defined(NRF_PSEL_SPIS)
 		case NRF_FUN_SPIS_SCK:
-			NRF_PSEL_SPIS(reg, SCK) = pin;
+			NRF_PSEL_SPIS(reg, SCK) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_SPIS_MOSI:
-			NRF_PSEL_SPIS(reg, MOSI) = pin;
+			NRF_PSEL_SPIS(reg, MOSI) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_SPIS_MISO:
-			NRF_PSEL_SPIS(reg, MISO) = pin;
+			NRF_PSEL_SPIS(reg, MISO) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_SPIS_CSN:
-			NRF_PSEL_SPIS(reg, CSN) = pin;
+			NRF_PSEL_SPIS(reg, CSN) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* defined(NRF_PSEL_SPIS) */
 #if defined(NRF_PSEL_TWIM)
 		case NRF_FUN_TWIM_SCL:
-			NRF_PSEL_TWIM(reg, SCL) = pin;
-			if (drive == NRF_DRIVE_S0S1) {
+			NRF_PSEL_TWIM(reg, SCL) = psel;
+			if (drive == NRF_GPIO_PIN_S0S1) {
 				/* Override the default drive setting with one
 				 * suitable for TWI/TWIM peripherals (S0D1).
 				 * This drive cannot be used always so that
 				 * users are able to select e.g. H0D1 or E0E1
 				 * in devicetree.
 				 */
-				drive = NRF_DRIVE_S0D1;
+				drive = NRF_GPIO_PIN_S0D1;
 			}
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_TWIM_SDA:
-			NRF_PSEL_TWIM(reg, SDA) = pin;
-			if (drive == NRF_DRIVE_S0S1) {
-				drive = NRF_DRIVE_S0D1;
+			NRF_PSEL_TWIM(reg, SDA) = psel;
+			if (drive == NRF_GPIO_PIN_S0S1) {
+				drive = NRF_GPIO_PIN_S0D1;
 			}
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
@@ -186,40 +200,40 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 #endif /* defined(NRF_PSEL_TWIM) */
 #if defined(NRF_PSEL_I2S)
 		case NRF_FUN_I2S_SCK_M:
-			NRF_PSEL_I2S(reg, SCK) = pin;
+			NRF_PSEL_I2S(reg, SCK) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_I2S_SCK_S:
-			NRF_PSEL_I2S(reg, SCK) = pin;
+			NRF_PSEL_I2S(reg, SCK) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_I2S_LRCK_M:
-			NRF_PSEL_I2S(reg, LRCK) = pin;
+			NRF_PSEL_I2S(reg, LRCK) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_I2S_LRCK_S:
-			NRF_PSEL_I2S(reg, LRCK) = pin;
+			NRF_PSEL_I2S(reg, LRCK) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_I2S_SDIN:
-			NRF_PSEL_I2S(reg, SDIN) = pin;
+			NRF_PSEL_I2S(reg, SDIN) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_I2S_SDOUT:
-			NRF_PSEL_I2S(reg, SDOUT) = pin;
+			NRF_PSEL_I2S(reg, SDOUT) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_I2S_MCK:
-			NRF_PSEL_I2S(reg, MCK) = pin;
+			NRF_PSEL_I2S(reg, MCK) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
@@ -227,38 +241,38 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 #endif /* defined(NRF_PSEL_I2S) */
 #if defined(NRF_PSEL_PDM)
 		case NRF_FUN_PDM_CLK:
-			NRF_PSEL_PDM(reg, CLK) = pin;
+			NRF_PSEL_PDM(reg, CLK) = psel;
 			write = 0U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_PDM_DIN:
-			NRF_PSEL_PDM(reg, DIN) = pin;
+			NRF_PSEL_PDM(reg, DIN) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* defined(NRF_PSEL_PDM) */
 #if defined(NRF_PSEL_PWM)
 		case NRF_FUN_PWM_OUT0:
-			NRF_PSEL_PWM(reg, OUT[0]) = pin;
+			NRF_PSEL_PWM(reg, OUT[0]) = psel;
 			write = NRF_GET_INVERT(pins[i]);
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_PWM_OUT1:
-			NRF_PSEL_PWM(reg, OUT[1]) = pin;
+			NRF_PSEL_PWM(reg, OUT[1]) = psel;
 			write = NRF_GET_INVERT(pins[i]);
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_PWM_OUT2:
-			NRF_PSEL_PWM(reg, OUT[2]) = pin;
+			NRF_PSEL_PWM(reg, OUT[2]) = psel;
 			write = NRF_GET_INVERT(pins[i]);
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_PWM_OUT3:
-			NRF_PSEL_PWM(reg, OUT[3]) = pin;
+			NRF_PSEL_PWM(reg, OUT[3]) = psel;
 			write = NRF_GET_INVERT(pins[i]);
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
@@ -266,50 +280,50 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 #endif /* defined(NRF_PSEL_PWM) */
 #if defined(NRF_PSEL_QDEC)
 		case NRF_FUN_QDEC_A:
-			NRF_PSEL_QDEC(reg, A) = pin;
+			NRF_PSEL_QDEC(reg, A) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_QDEC_B:
-			NRF_PSEL_QDEC(reg, B) = pin;
+			NRF_PSEL_QDEC(reg, B) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 		case NRF_FUN_QDEC_LED:
-			NRF_PSEL_QDEC(reg, LED) = pin;
+			NRF_PSEL_QDEC(reg, LED) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_CONNECT;
 			break;
 #endif /* defined(NRF_PSEL_QDEC) */
 #if defined(NRF_PSEL_QSPI)
 		case NRF_FUN_QSPI_SCK:
-			NRF_PSEL_QSPI(reg, SCK) = pin;
+			NRF_PSEL_QSPI(reg, SCK) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_QSPI_CSN:
-			NRF_PSEL_QSPI(reg, CSN) = pin;
+			NRF_PSEL_QSPI(reg, CSN) = psel;
 			write = 1U;
 			dir = NRF_GPIO_PIN_DIR_OUTPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_QSPI_IO0:
-			NRF_PSEL_QSPI(reg, IO0) = pin;
+			NRF_PSEL_QSPI(reg, IO0) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_QSPI_IO1:
-			NRF_PSEL_QSPI(reg, IO1) = pin;
+			NRF_PSEL_QSPI(reg, IO1) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_QSPI_IO2:
-			NRF_PSEL_QSPI(reg, IO2) = pin;
+			NRF_PSEL_QSPI(reg, IO2) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
 		case NRF_FUN_QSPI_IO3:
-			NRF_PSEL_QSPI(reg, IO3) = pin;
+			NRF_PSEL_QSPI(reg, IO3) = psel;
 			dir = NRF_GPIO_PIN_DIR_INPUT;
 			input = NRF_GPIO_PIN_INPUT_DISCONNECT;
 			break;
@@ -319,7 +333,9 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 		}
 
 		/* configure GPIO properties */
-		if (pin != NRF_PIN_DISCONNECTED) {
+		if (psel != PSEL_DISCONNECTED) {
+			uint32_t pin = psel;
+
 			if (write != NO_WRITE) {
 				nrf_gpio_pin_write(pin, write);
 			}

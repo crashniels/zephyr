@@ -17,6 +17,7 @@
 #define MPU6050_REG_CHIP_ID		0x75
 #define MPU6050_CHIP_ID			0x68
 #define MPU9250_CHIP_ID			0x71
+#define MPU6880_CHIP_ID			0x19
 
 #define MPU6050_REG_GYRO_CFG		0x1B
 #define MPU6050_GYRO_FS_SHIFT		3
@@ -54,7 +55,7 @@ struct mpu6050_data {
 	const struct device *dev;
 	struct gpio_callback gpio_cb;
 
-	struct sensor_trigger data_ready_trigger;
+	const struct sensor_trigger *data_ready_trigger;
 	sensor_trigger_handler_t data_ready_handler;
 
 #if defined(CONFIG_MPU6050_TRIGGER_OWN_THREAD)

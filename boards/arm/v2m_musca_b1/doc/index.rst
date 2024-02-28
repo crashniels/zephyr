@@ -205,7 +205,7 @@ Peripheral Mapping:
    - I2C_0_SDA : D14
    - I2C_0_SCL : D15
 
-For mode details please refer to `Musca B1 Technical Reference Manual (TRM)`_.
+For more details please refer to `Musca B1 Technical Reference Manual (TRM)`_.
 
 
 RGB LED
@@ -399,7 +399,7 @@ serial port:
    https://developer.arm.com/documentation/dto0051/latest/subsystem-overview/about-the-sse-200
 
 .. _Srecord Manual:
-   http://srecord.sourceforge.net/man/man1/srec_cat.html
+   https://srecord.sourceforge.net/man/man1/srec_cat.1.html
 
 .. _IDAU:
    https://developer.arm.com/documentation/100690/latest/Attribution-units--SAU-and-IDAU-

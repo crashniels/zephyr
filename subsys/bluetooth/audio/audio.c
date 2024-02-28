@@ -10,8 +10,64 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/audio/audio.h>
+#include <zephyr/bluetooth/audio/bap.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/check.h>
 
 #include "audio_internal.h"
+
+LOG_MODULE_REGISTER(bt_audio, CONFIG_BT_AUDIO_LOG_LEVEL);
+
+int bt_audio_data_parse(const uint8_t ltv[], size_t size,
+			bool (*func)(struct bt_data *data, void *user_data), void *user_data)
+{
+	CHECKIF(ltv == NULL) {
+		LOG_DBG("ltv is NULL");
+
+		return -EINVAL;
+	}
+
+	CHECKIF(func == NULL) {
+		LOG_DBG("func is NULL");
+
+		return -EINVAL;
+	}
+
+	for (size_t i = 0; i < size;) {
+		const uint8_t len = ltv[i];
+		struct bt_data data;
+
+		if (i + len > size || len < sizeof(data.type)) {
+			LOG_DBG("Invalid len %u at i = %zu", len, i);
+
+			return -EINVAL;
+		}
+
+		i++; /* Increment as we have parsed the len field */
+
+		data.type = ltv[i++];
+		data.data_len = len - sizeof(data.type);
+
+		if (data.data_len > 0) {
+			data.data = &ltv[i];
+		} else {
+			data.data = NULL;
+		}
+
+		if (!func(&data, user_data)) {
+			return -ECANCELED;
+		}
+
+		/* Since we are incrementing i by the value_len, we don't need to increment it
+		 * further in the `for` statement
+		 */
+		i += data.data_len;
+	}
+
+	return 0;
+}
+
+#if defined(CONFIG_BT_CONN)
 
 static uint8_t bt_audio_security_check(const struct bt_conn *conn)
 {
@@ -97,3 +153,4 @@ ssize_t bt_audio_ccc_cfg_write(struct bt_conn *conn, const struct bt_gatt_attr *
 
 	return sizeof(value);
 }
+#endif /* CONFIG_BT_CONN */

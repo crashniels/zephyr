@@ -144,7 +144,7 @@ typedef struct s_isrList {
  */
 #define _X86_IDT_TSS_REGISTER(tss_p, irq_p, priority_p, vec_p, dpl_p) \
 	static ISR_LIST __attribute__((section(".intList"))) \
-			__attribute__((used)) MK_ISR_NAME(r) = \
+			__attribute__((used)) MK_ISR_NAME(vec_p) = \
 			{ \
 				.fnc = NULL, \
 				.irq = (irq_p), \
@@ -396,18 +396,6 @@ static ALWAYS_INLINE unsigned int arch_irq_lock(void)
  * correspond to any IRQ line (such as spurious vector or SW IRQ)
  */
 #define NANO_SOFT_IRQ	((unsigned int) (-1))
-
-/**
- * @defgroup float_apis Floating Point APIs
- * @ingroup kernel_apis
- * @{
- */
-
-struct k_thread;
-
-/**
- * @}
- */
 
 #ifdef CONFIG_X86_ENABLE_TSS
 extern struct task_state_segment _main_tss;

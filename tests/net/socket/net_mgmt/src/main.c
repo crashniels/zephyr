@@ -26,7 +26,7 @@ static ZTEST_BMEM int fd;
 static ZTEST_BMEM struct in6_addr addr_v6;
 static ZTEST_DMEM struct in_addr addr_v4 = { { { 192, 0, 2, 3 } } };
 
-#if IS_ENABLED(CONFIG_NET_SOCKETS_LOG_LEVEL_DBG)
+#if defined(CONFIG_NET_SOCKETS_LOG_LEVEL_DBG)
 #define DBG(fmt, ...) printk(fmt, ##__VA_ARGS__)
 #else
 #define DBG(fmt, ...)
@@ -455,6 +455,34 @@ ZTEST(net_socket_net_mgmt, test_net_mgmt_catch_kernel)
 ZTEST_USER(net_socket_net_mgmt, test_net_mgmt_catch_user)
 {
 	test_net_mgmt_catch_events();
+}
+
+static void test_net_mgmt_catch_events_failure(void)
+{
+#define SMALL_BUF_LEN 16
+	struct sockaddr_nm event_addr;
+	socklen_t event_addr_len;
+	uint8_t buf[SMALL_BUF_LEN];
+	int ret;
+
+	memset(buf, 0, sizeof(buf));
+	event_addr_len = sizeof(event_addr);
+
+	ret = recvfrom(fd, buf, sizeof(buf), 0,
+		       (struct sockaddr *)&event_addr,
+		       &event_addr_len);
+	zassert_equal(ret, -1, "Msg check failed, %d", errno);
+	zassert_equal(errno, EMSGSIZE, "Msg check failed, errno %d", errno);
+}
+
+ZTEST(net_socket_net_mgmt, test_net_mgmt_catch_failure_kernel)
+{
+	test_net_mgmt_catch_events_failure();
+}
+
+ZTEST_USER(net_socket_net_mgmt, test_net_mgmt_catch_failure_user)
+{
+	test_net_mgmt_catch_events_failure();
 }
 
 ZTEST(net_socket_net_mgmt, test_net_mgmt_cleanup)

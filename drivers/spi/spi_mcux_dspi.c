@@ -195,11 +195,11 @@ static int spi_mcux_transfer_next_packet(const struct device *dev)
 
 	status = DSPI_MasterTransferNonBlocking(base, &data->handle, &transfer);
 	if (status != kStatus_Success) {
-		LOG_ERR("Transfer could not start");
+		LOG_ERR("Transfer could not start on %s: %d", dev->name, status);
+		return status == kDSPI_Busy ? -EBUSY : -EINVAL;
 	}
 
-	return status == kStatus_Success ? 0 :
-	       status == kDSPI_Busy ? -EBUSY : -EINVAL;
+	return 0;
 }
 
 static void spi_mcux_isr(const struct device *dev)
@@ -482,7 +482,7 @@ static void dma_callback(const struct device *dma_dev, void *callback_arg,
 
 	LOG_DBG("=dma call back @channel %d=", channel);
 
-	if (error_code) {
+	if (error_code < 0) {
 		LOG_ERR("error happened no callback process %d", error_code);
 		return;
 	}

@@ -51,6 +51,7 @@ int iis3dhhc_trigger_set(const struct device *dev,
 
 	if (trig->chan == SENSOR_CHAN_ACCEL_XYZ) {
 		iis3dhhc->handler_drdy = handler;
+		iis3dhhc->trig_drdy = trig;
 		if (handler) {
 			/* dummy read: re-trigger interrupt */
 			iis3dhhc_acceleration_raw_get(iis3dhhc->ctx, raw);
@@ -70,13 +71,10 @@ int iis3dhhc_trigger_set(const struct device *dev,
 static void iis3dhhc_handle_interrupt(const struct device *dev)
 {
 	struct iis3dhhc_data *iis3dhhc = dev->data;
-	struct sensor_trigger drdy_trigger = {
-		.type = SENSOR_TRIG_DATA_READY,
-	};
 	const struct iis3dhhc_config *cfg = dev->config;
 
 	if (iis3dhhc->handler_drdy != NULL) {
-		iis3dhhc->handler_drdy(dev, &drdy_trigger);
+		iis3dhhc->handler_drdy(dev, iis3dhhc->trig_drdy);
 	}
 
 	gpio_pin_interrupt_configure_dt(&cfg->int_gpio, GPIO_INT_EDGE_TO_ACTIVE);
@@ -101,8 +99,13 @@ static void iis3dhhc_gpio_callback(const struct device *dev,
 }
 
 #ifdef CONFIG_IIS3DHHC_TRIGGER_OWN_THREAD
-static void iis3dhhc_thread(struct iis3dhhc_data *iis3dhhc)
+static void iis3dhhc_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct iis3dhhc_data *iis3dhhc = p1;
+
 	while (1) {
 		k_sem_take(&iis3dhhc->gpio_sem, K_FOREVER);
 		iis3dhhc_handle_interrupt(iis3dhhc->dev);
@@ -126,7 +129,7 @@ int iis3dhhc_init_interrupt(const struct device *dev)
 	const struct iis3dhhc_config *cfg = dev->config;
 	int ret;
 
-	if (!device_is_ready(cfg->int_gpio.port)) {
+	if (!gpio_is_ready_dt(&cfg->int_gpio)) {
 		LOG_ERR("%s: device %s is not ready", dev->name, cfg->int_gpio.port->name);
 		return -ENODEV;
 	}
@@ -138,7 +141,7 @@ int iis3dhhc_init_interrupt(const struct device *dev)
 
 	k_thread_create(&iis3dhhc->thread, iis3dhhc->thread_stack,
 		       CONFIG_IIS3DHHC_THREAD_STACK_SIZE,
-		       (k_thread_entry_t)iis3dhhc_thread, iis3dhhc,
+		       iis3dhhc_thread, iis3dhhc,
 		       NULL, NULL, K_PRIO_COOP(CONFIG_IIS3DHHC_THREAD_PRIORITY),
 		       0, K_NO_WAIT);
 #elif defined(CONFIG_IIS3DHHC_TRIGGER_GLOBAL_THREAD)

@@ -37,7 +37,7 @@ int hmc5883l_trigger_set(const struct device *dev,
 		return 0;
 	}
 
-	drv_data->data_ready_trigger = *trig;
+	drv_data->data_ready_trigger = trig;
 
 	gpio_pin_interrupt_configure_dt(&config->int_gpio,
 					GPIO_INT_EDGE_TO_ACTIVE);
@@ -70,7 +70,7 @@ static void hmc5883l_thread_cb(const struct device *dev)
 
 	if (drv_data->data_ready_handler != NULL) {
 		drv_data->data_ready_handler(dev,
-					     &drv_data->data_ready_trigger);
+					     drv_data->data_ready_trigger);
 	}
 
 	gpio_pin_interrupt_configure_dt(&config->int_gpio,
@@ -78,8 +78,13 @@ static void hmc5883l_thread_cb(const struct device *dev)
 }
 
 #ifdef CONFIG_HMC5883L_TRIGGER_OWN_THREAD
-static void hmc5883l_thread(struct hmc5883l_data *drv_data)
+static void hmc5883l_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct hmc5883l_data *drv_data = p1;
+
 	while (1) {
 		k_sem_take(&drv_data->gpio_sem, K_FOREVER);
 		hmc5883l_thread_cb(drv_data->dev);
@@ -102,7 +107,7 @@ int hmc5883l_init_interrupt(const struct device *dev)
 	struct hmc5883l_data *drv_data = dev->data;
 	const struct hmc5883l_config *config = dev->config;
 
-	if (!device_is_ready(config->int_gpio.port)) {
+	if (!gpio_is_ready_dt(&config->int_gpio)) {
 		LOG_ERR("GPIO device not ready");
 		return -ENODEV;
 	}
@@ -124,7 +129,7 @@ int hmc5883l_init_interrupt(const struct device *dev)
 
 	k_thread_create(&drv_data->thread, drv_data->thread_stack,
 			CONFIG_HMC5883L_THREAD_STACK_SIZE,
-			(k_thread_entry_t)hmc5883l_thread,
+			hmc5883l_thread,
 			drv_data, NULL, NULL,
 			K_PRIO_COOP(CONFIG_HMC5883L_THREAD_PRIORITY),
 			0, K_NO_WAIT);

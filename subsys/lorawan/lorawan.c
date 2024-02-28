@@ -15,29 +15,26 @@
 #include <Region.h>
 #include "nvm/lorawan_nvm.h"
 
-BUILD_ASSERT(!IS_ENABLED(CONFIG_LORAMAC_REGION_UNKNOWN),
-	     "Unknown region specified for LoRaWAN in Kconfig");
-
 #ifdef CONFIG_LORAMAC_REGION_AS923
-#define LORAWAN_REGION LORAMAC_REGION_AS923
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_AS923
 #elif CONFIG_LORAMAC_REGION_AU915
-#define LORAWAN_REGION LORAMAC_REGION_AU915
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_AU915
 #elif CONFIG_LORAMAC_REGION_CN470
-#define LORAWAN_REGION LORAMAC_REGION_CN470
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_CN470
 #elif CONFIG_LORAMAC_REGION_CN779
-#define LORAWAN_REGION LORAMAC_REGION_CN779
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_CN779
 #elif CONFIG_LORAMAC_REGION_EU433
-#define LORAWAN_REGION LORAMAC_REGION_EU433
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_EU433
 #elif CONFIG_LORAMAC_REGION_EU868
-#define LORAWAN_REGION LORAMAC_REGION_EU868
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_EU868
 #elif CONFIG_LORAMAC_REGION_KR920
-#define LORAWAN_REGION LORAMAC_REGION_KR920
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_KR920
 #elif CONFIG_LORAMAC_REGION_IN865
-#define LORAWAN_REGION LORAMAC_REGION_IN865
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_IN865
 #elif CONFIG_LORAMAC_REGION_US915
-#define LORAWAN_REGION LORAMAC_REGION_US915
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_US915
 #elif CONFIG_LORAMAC_REGION_RU864
-#define LORAWAN_REGION LORAMAC_REGION_RU864
+#define DEFAULT_LORAWAN_REGION LORAMAC_REGION_RU864
 #else
 #error "At least one LoRaWAN region should be selected"
 #endif
@@ -73,8 +70,10 @@ static LoRaMacEventInfoStatus_t last_mlme_confirm_status;
 static LoRaMacEventInfoStatus_t last_mcps_indication_status;
 static LoRaMacEventInfoStatus_t last_mlme_indication_status;
 
-static uint8_t (*get_battery_level_user)(void);
-static void (*dr_change_cb)(enum lorawan_datarate dr);
+static LoRaMacRegion_t selected_region = DEFAULT_LORAWAN_REGION;
+
+static lorawan_battery_level_cb_t battery_level_cb;
+static lorawan_dr_changed_cb_t dr_changed_cb;
 
 /* implementation required by the soft-se (software secure element) */
 void BoardGetUniqueId(uint8_t *id)
@@ -84,11 +83,11 @@ void BoardGetUniqueId(uint8_t *id)
 
 static uint8_t get_battery_level(void)
 {
-	if (get_battery_level_user != NULL) {
-		return get_battery_level_user();
+	if (battery_level_cb != NULL) {
+		return battery_level_cb();
+	} else {
+		return 255;
 	}
-
-	return 255;
 }
 
 static void mac_process_notify(void)
@@ -106,8 +105,8 @@ static void datarate_observe(bool force_notification)
 	if ((mib_req.Param.ChannelsDatarate != current_datarate) ||
 	    (force_notification)) {
 		current_datarate = mib_req.Param.ChannelsDatarate;
-		if (dr_change_cb) {
-			dr_change_cb(current_datarate);
+		if (dr_changed_cb != NULL) {
+			dr_changed_cb(current_datarate);
 		}
 		LOG_INF("Datarate changed: DR_%d", current_datarate);
 	}
@@ -286,6 +285,80 @@ static LoRaMacStatus_t lorawan_join_abp(
 	return LORAMAC_STATUS_OK;
 }
 
+int lorawan_set_region(enum lorawan_region region)
+{
+	switch (region) {
+
+#if defined(CONFIG_LORAMAC_REGION_AS923)
+	case LORAWAN_REGION_AS923:
+		selected_region = LORAMAC_REGION_AS923;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_AU915)
+	case LORAWAN_REGION_AU915:
+		selected_region = LORAMAC_REGION_AU915;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_CN470)
+	case LORAWAN_REGION_CN470:
+		selected_region = LORAMAC_REGION_CN470;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_CN779)
+	case LORAWAN_REGION_CN779:
+		selected_region = LORAMAC_REGION_CN779;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_EU433)
+	case LORAWAN_REGION_EU433:
+		selected_region = LORAMAC_REGION_EU433;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_EU868)
+	case LORAWAN_REGION_EU868:
+		selected_region = LORAMAC_REGION_EU868;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_KR920)
+	case LORAWAN_REGION_KR920:
+		selected_region = LORAMAC_REGION_KR920;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_IN865)
+	case LORAWAN_REGION_IN865:
+		selected_region = LORAMAC_REGION_IN865;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_US915)
+	case LORAWAN_REGION_US915:
+		selected_region = LORAMAC_REGION_US915;
+		break;
+#endif
+
+#if defined(CONFIG_LORAMAC_REGION_RU864)
+	case LORAWAN_REGION_RU864:
+		selected_region = LORAMAC_REGION_RU864;
+		break;
+#endif
+
+	default:
+		LOG_ERR("No support for region %d!", region);
+		return -ENOTSUP;
+	}
+
+	LOG_DBG("Selected region %d", region);
+
+	return 0;
+}
+
 int lorawan_join(const struct lorawan_join_config *join_cfg)
 {
 	MibRequestConfirm_t mib_req;
@@ -296,7 +369,7 @@ int lorawan_join(const struct lorawan_join_config *join_cfg)
 
 	/* MIB_PUBLIC_NETWORK powers on the radio and does not turn it off */
 	mib_req.Type = MIB_PUBLIC_NETWORK;
-	mib_req.Param.EnablePublicNetwork = true;
+	mib_req.Param.EnablePublicNetwork = IS_ENABLED(CONFIG_LORAWAN_PUBLIC_NETWORK);
 	LoRaMacMibSetRequestConfirm(&mib_req);
 
 	if (join_cfg->mode == LORAWAN_ACT_OTAA) {
@@ -345,11 +418,11 @@ out:
 		 * responsibility to increase datarates when ADR is enabled.
 		 */
 		if (!lorawan_adr_enable) {
-			MibRequestConfirm_t mib_req;
+			MibRequestConfirm_t mib_req2;
 
-			mib_req.Type = MIB_CHANNELS_DATARATE;
-			mib_req.Param.ChannelsDatarate = default_datarate;
-			LoRaMacMibSetRequestConfirm(&mib_req);
+			mib_req2.Type = MIB_CHANNELS_DATARATE;
+			mib_req2.Param.ChannelsDatarate = default_datarate;
+			LoRaMacMibSetRequestConfirm(&mib_req2);
 		}
 
 		/*
@@ -548,15 +621,9 @@ out:
 	return ret;
 }
 
-int lorawan_set_battery_level_callback(uint8_t (*battery_lvl_cb)(void))
+void lorawan_register_battery_level_callback(lorawan_battery_level_cb_t cb)
 {
-	if (battery_lvl_cb == NULL) {
-		return -EINVAL;
-	}
-
-	get_battery_level_user = battery_lvl_cb;
-
-	return 0;
+	battery_level_cb = cb;
 }
 
 void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb)
@@ -564,9 +631,9 @@ void lorawan_register_downlink_callback(struct lorawan_downlink_cb *cb)
 	sys_slist_append(&dl_callbacks, &cb->node);
 }
 
-void lorawan_register_dr_changed_callback(void (*cb)(enum lorawan_datarate))
+void lorawan_register_dr_changed_callback(lorawan_dr_changed_cb_t cb)
 {
-	dr_change_cb = cb;
+	dr_changed_cb = cb;
 }
 
 int lorawan_start(void)
@@ -575,6 +642,21 @@ int lorawan_start(void)
 	MibRequestConfirm_t mib_req;
 	GetPhyParams_t phy_params;
 	PhyParam_t phy_param;
+
+	status = LoRaMacInitialization(&mac_primitives, &mac_callbacks,
+				       selected_region);
+	if (status != LORAMAC_STATUS_OK) {
+		LOG_ERR("LoRaMacInitialization failed: %s",
+			lorawan_status2str(status));
+		return -EINVAL;
+	}
+
+	LOG_DBG("LoRaMAC Initialized");
+
+	if (!IS_ENABLED(CONFIG_LORAWAN_NVM_NONE)) {
+		lorawan_nvm_init();
+		lorawan_nvm_data_restore();
+	}
 
 	status = LoRaMacStart();
 	if (status != LORAMAC_STATUS_OK) {
@@ -585,7 +667,7 @@ int lorawan_start(void)
 
 	/* Retrieve the default TX datarate for selected region */
 	phy_params.Attribute = PHY_DEF_TX_DR;
-	phy_param = RegionGetPhyParam(LORAWAN_REGION, &phy_params);
+	phy_param = RegionGetPhyParam(selected_region, &phy_params);
 	default_datarate = phy_param.Value;
 	current_datarate = default_datarate;
 
@@ -597,11 +679,8 @@ int lorawan_start(void)
 	return 0;
 }
 
-static int lorawan_init(const struct device *dev)
+static int lorawan_init(void)
 {
-	ARG_UNUSED(dev);
-
-	LoRaMacStatus_t status;
 
 	sys_slist_init(&dl_callbacks);
 
@@ -620,21 +699,7 @@ static int lorawan_init(const struct device *dev)
 
 	mac_callbacks.MacProcessNotify = mac_process_notify;
 
-	status = LoRaMacInitialization(&mac_primitives, &mac_callbacks,
-				       LORAWAN_REGION);
-	if (status != LORAMAC_STATUS_OK) {
-		LOG_ERR("LoRaMacInitialization failed: %s",
-			lorawan_status2str(status));
-		return -EINVAL;
-	}
-
-	if (!IS_ENABLED(CONFIG_LORAWAN_NVM_NONE)) {
-		lorawan_nvm_init();
-		lorawan_nvm_data_restore();
-	}
-
-	LOG_DBG("LoRaMAC Initialized");
-
 	return 0;
 }
-SYS_INIT(lorawan_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
+
+SYS_INIT(lorawan_init, POST_KERNEL, 0);

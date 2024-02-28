@@ -530,8 +530,13 @@ void sys_trace_thread_info(struct k_thread *thread);
 #define sys_port_trace_k_pipe_get_enter(pipe, timeout)
 #define sys_port_trace_k_pipe_get_blocking(pipe, timeout)
 #define sys_port_trace_k_pipe_get_exit(pipe, timeout, ret)
-#define sys_port_trace_k_pipe_block_put_enter(pipe, sem)
-#define sys_port_trace_k_pipe_block_put_exit(pipe, sem)
+
+#define sys_port_trace_k_event_init(event)
+#define sys_port_trace_k_event_post_enter(event, events, events_mask)
+#define sys_port_trace_k_event_post_exit(event, events, events_mask)
+#define sys_port_trace_k_event_wait_enter(event, events, options, timeout)
+#define sys_port_trace_k_event_wait_blocking(event, events, options, timeout)
+#define sys_port_trace_k_event_wait_exit(event, events, ret)
 
 #define sys_port_trace_k_heap_init(heap)                                                           \
 	SEGGER_SYSVIEW_RecordU32(TID_HEAP_INIT, (uint32_t)(uintptr_t)heap)
@@ -599,10 +604,10 @@ void sys_trace_thread_info(struct k_thread *thread);
 	SEGGER_SYSVIEW_RecordEndCallU32(TID_TIMER_STATUS_SYNC, (uint32_t)result)
 
 #define sys_port_trace_syscall_enter(id, name, ...)	\
-	SEGGER_SYSVIEW_RecordU32(TID_SYSCALL, (uint32_t)id)
+	SEGGER_SYSVIEW_RecordString(TID_SYSCALL, (const char *)#name)
 
 #define sys_port_trace_syscall_exit(id, name, ...)	\
-	SEGGER_SYSVIEW_RecordEndCallU32(TID_SYSCALL, (uint32_t)id)
+	SEGGER_SYSVIEW_RecordEndCall(TID_SYSCALL)
 
 void sys_trace_idle(void);
 
@@ -635,10 +640,10 @@ void sys_trace_k_thread_info(struct k_thread *thread);
 #define sys_port_trace_pm_device_runtime_put_exit(dev, ret)		       \
 	SEGGER_SYSVIEW_RecordEndCallU32(TID_PM_DEVICE_RUNTIME_PUT,	       \
 					(uint32_t)ret)
-#define sys_port_trace_pm_device_runtime_put_async_enter(dev)		       \
+#define sys_port_trace_pm_device_runtime_put_async_enter(dev, delay)	       \
 	SEGGER_SYSVIEW_RecordU32(TID_PM_DEVICE_RUNTIME_PUT_ASYNC,	       \
-				 (uint32_t)(uintptr_t)dev)
-#define sys_port_trace_pm_device_runtime_put_async_exit(dev, ret)	       \
+			 (uint32_t)(uintptr_t)dev, (uint32_t)delay.ticks)
+#define sys_port_trace_pm_device_runtime_put_async_exit(dev, delay, ret)       \
 	SEGGER_SYSVIEW_RecordEndCallU32(TID_PM_DEVICE_RUNTIME_PUT_ASYNC,       \
 					(uint32_t)ret)
 #define sys_port_trace_pm_device_runtime_enable_enter(dev)		       \

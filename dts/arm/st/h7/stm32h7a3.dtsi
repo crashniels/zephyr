@@ -5,11 +5,15 @@
  */
 
 #include <st/h7/stm32h7.dtsi>
-#include <zephyr/dt-bindings/display/stm32_ltdc.h>
+#include <zephyr/dt-bindings/display/panel.h>
 #include <zephyr/dt-bindings/flash_controller/ospi.h>
+
+/delete-node/ &adc3;
 
 / {
 	soc {
+		compatible = "st,stm32h7a3", "st,stm32h7", "simple-bus";
+
 		flash-controller@52002000 {
 			flash0: flash@8000000 {
 				compatible = "st,stm32-nv-flash", "soc-nv-flash";
@@ -21,7 +25,11 @@
 		};
 
 		dmamux1: dmamux@40020800 {
-			dma-requests= <111>;
+			dma-requests= <107>;
+		};
+
+		dmamux2: dmamux@58025800 {
+			dma-requests= <107>;
 		};
 
 		usbotg_hs: usb@40040000 {
@@ -32,7 +40,8 @@
 			num-bidir-endpoints = <9>;
 			ram-size = <4096>;
 			maximum-speed = "full-speed";
-			clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x02000000>;
+			clocks = <&rcc STM32_CLOCK_BUS_AHB1 0x02000000>,
+				 <&rcc STM32_SRC_HSI48 USB_SEL(3)>;
 			phys = <&otghs_fs_phy>;
 			status = "disabled";
 		};
@@ -50,6 +59,7 @@
 			compatible = "st,stm32-ospi";
 			reg = <0x52005000 0x1000>;
 			interrupts = <92 0>;
+			clock-names = "ospix", "ospi-ker";
 			clocks = <&rcc STM32_CLOCK_BUS_AHB3 0x00004000>,
 				<&rcc STM32_SRC_PLL1_Q OSPI_SEL(1)>;
 			#address-cells = <1>;
@@ -61,10 +71,24 @@
 			compatible = "st,stm32-ospi";
 			reg = <0x5200a000 0x1000>;
 			interrupts = <150 0>;
+			clock-names = "ospix", "ospi-ker";
 			clocks = <&rcc STM32_CLOCK_BUS_AHB3 0x000080000>,
 				<&rcc STM32_SRC_PLL1_Q OSPI_SEL(1)>;
 			#address-cells = <1>;
 			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		i2s6: i2s@58001400 {
+			compatible = "st,stm32h7-i2s", "st,stm32-i2s";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x58001400 0x400>;
+			clocks = <&rcc STM32_CLOCK_BUS_APB4 0x00000020>,
+				 <&rcc STM32_SRC_PLL1_Q SPI6_SEL(0)>;
+			dmas = <&dmamux2 0 12 0x20440 &dmamux2 1 11 0x20480>;
+			dma-names = "tx", "rx";
+			interrupts = <86 0>;
 			status = "disabled";
 		};
 
@@ -138,5 +162,14 @@
 		ts-cal2-addr = <0x08FFF818>;
 		io-channels = <&adc2 18>;
 		ts-cal2-temp = <130>;
+	};
+
+	vref: vref {
+		vrefint-cal-addr = <0x08FFF810>;
+		io-channels = <&adc2 19>;
+	};
+
+	vbat: vbat {
+		io-channels = <&adc2 14>;
 	};
 };

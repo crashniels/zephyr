@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-set_property(TARGET linker PROPERTY devices_start_symbol "__device_start")
+set_property(TARGET linker PROPERTY devices_start_symbol "_device_list_start")
 
-find_program(CMAKE_LINKER     ld.lld )
+find_package(LlvmLld 14.0.0 REQUIRED)
+set(CMAKE_LINKER ${LLVMLLD_LINKER})
 
 set_ifndef(LINKERFLAGPREFIX -Wl)
 
@@ -109,6 +110,6 @@ endfunction(toolchain_ld_link_elf)
 # Load toolchain_ld-family macros
 include(${ZEPHYR_BASE}/cmake/linker/${LINKER}/target_base.cmake)
 include(${ZEPHYR_BASE}/cmake/linker/${LINKER}/target_baremetal.cmake)
-include(${ZEPHYR_BASE}/cmake/linker/ld/target_cpp.cmake)
+include(${ZEPHYR_BASE}/cmake/linker/${LINKER}/target_cpp.cmake)
 include(${ZEPHYR_BASE}/cmake/linker/ld/target_relocation.cmake)
 include(${ZEPHYR_BASE}/cmake/linker/ld/target_configure.cmake)

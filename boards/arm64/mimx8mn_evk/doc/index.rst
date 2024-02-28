@@ -7,7 +7,7 @@ Overview
 ********
 
 i.MX8M Nano LPDDR4 EVK board is based on NXP i.MX8M Nano applications
-processor, composed of a quad Cortex®-A53 cluster and a single Cortex®-M47 core.
+processor, composed of a quad Cortex®-A53 cluster and a single Cortex®-M7 core.
 Zephyr OS is ported to run on the Cortex®-A53 core.
 
 - Board features:
@@ -88,11 +88,11 @@ Or kick SMP zephyr.bin:
 
 .. code-block:: console
 
-    mw 303d0518 f 1; fatload mmc 1:1 0x93c00000 zephyr.bin; dcache flush; icache flush; dcache off; icache off; cpu release 2 0x93c00000
+    mw 303d0518 f 1; fatload mmc 1:1 0x93c00000 zephyr.bin; dcache flush; icache flush; dcache off; icache off; cpu 2 release 0x93c00000
 
 
 Use this configuration to run basic Zephyr applications and kernel tests,
-for example, with the :ref:`synchronization_sample`:
+for example, with the :zephyr:code-sample:`synchronization` sample:
 
 .. zephyr-app-commands::
    :zephyr-app: samples/synchronization

@@ -16,67 +16,32 @@
  * Note that all passed in addresses should be in cached range
  * (aka cached addresses). Due to the need to calculate TLB
  * indexes, virtual addresses will be converted internally to
- * cached one via z_soc_cached_ptr(). However, physical addresses
+ * cached one via sys_cache_cached_ptr_get(). However, physical addresses
  * are untouched.
  */
 
-#define DT_DRV_COMPAT intel_adsp_mtl_tlb
+#include "mm_drv_intel_adsp.h"
+#include <soc_util.h>
+#include <zephyr/drivers/mm/mm_drv_intel_adsp_mtl_tlb.h>
+#include <zephyr/drivers/mm/mm_drv_bank.h>
+#include <zephyr/debug/sparse.h>
+#include <zephyr/cache.h>
 
-#include <zephyr/device.h>
-#include <zephyr/kernel.h>
-#include <zephyr/spinlock.h>
-#include <zephyr/sys/__assert.h>
-#include <zephyr/sys/check.h>
-#include <zephyr/sys/mem_manage.h>
-#include <zephyr/sys/util.h>
-#include <zephyr/drivers/mm/system_mm.h>
-#include <zephyr/sys/mem_blocks.h>
-
-#include <soc.h>
-#include <adsp_memory.h>
-
-#include "mm_drv_common.h"
-
-DEVICE_MMIO_TOPLEVEL_STATIC(tlb_regs, DT_DRV_INST(0));
-
-#define TLB_BASE \
-	((mm_reg_t)DEVICE_MMIO_TOPLEVEL_GET(tlb_regs))
-
-/*
- * Number of significant bits in the page index (defines the size of
- * the table)
- */
-#define TLB_PADDR_SIZE DT_INST_PROP(0, paddr_size)
-#define TLB_EXEC_BIT   BIT(DT_INST_PROP(0, exec_bit_idx))
-#define TLB_WRITE_BIT  BIT(DT_INST_PROP(0, write_bit_idx))
-
-#define TLB_ENTRY_NUM (1 << TLB_PADDR_SIZE)
-#define TLB_PADDR_MASK ((1 << TLB_PADDR_SIZE) - 1)
-#define TLB_ENABLE_BIT BIT(TLB_PADDR_SIZE)
-
-/* This is used to translate from TLB entry back to physical address. */
-#define TLB_PHYS_BASE  \
-	(((L2_SRAM_BASE / CONFIG_MM_DRV_PAGE_SIZE) & ~TLB_PADDR_MASK) * CONFIG_MM_DRV_PAGE_SIZE)
-#define HPSRAM_SEGMENTS(hpsram_ebb_quantity) \
-	((ROUND_DOWN((hpsram_ebb_quantity) + 31u, 32u) / 32u) - 1u)
-
-#define L2_SRAM_PAGES_NUM			(L2_SRAM_SIZE / CONFIG_MM_DRV_PAGE_SIZE)
-#define MAX_EBB_BANKS_IN_SEGMENT	32
-#define SRAM_BANK_SIZE				(128 * 1024)
-#define L2_SRAM_BANK_NUM			(L2_SRAM_SIZE / SRAM_BANK_SIZE)
-#define IS_BIT_SET(value, idx)		((value) & (1 << (idx)))
+#define SRAM_BANK_PAGE_NUM   (SRAM_BANK_SIZE / CONFIG_MM_DRV_PAGE_SIZE)
 
 static struct k_spinlock tlb_lock;
 extern struct k_spinlock sys_mm_drv_common_lock;
 
-static int hpsram_ref[L2_SRAM_BANK_NUM];
+static struct sys_mm_drv_bank hpsram_bank[L2_SRAM_BANK_NUM];
 
-/* declare L2 physical memory block */
-SYS_MEM_BLOCKS_DEFINE_WITH_EXT_BUF(
-		L2_PHYS_SRAM_REGION,
-		CONFIG_MM_DRV_PAGE_SIZE,
-		L2_SRAM_PAGES_NUM,
-		(uint8_t *) L2_SRAM_BASE);
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+#include <adsp_comm_widget.h>
+
+static uint32_t used_pages;
+/* PMC uses 32 KB banks */
+static uint32_t used_pmc_banks_reported;
+#endif
+
 
 /* Define a marker which is placed by the linker script just after
  * last explicitly defined section. All .text, .data, .bss and .heap
@@ -86,29 +51,15 @@ SYS_MEM_BLOCKS_DEFINE_WITH_EXT_BUF(
  */
 __attribute__((__section__(".unused_ram_start_marker")))
 static int unused_l2_sram_start_marker = 0xba0babce;
+#define UNUSED_L2_START_ALIGNED ROUND_UP(POINTER_TO_UINT(&unused_l2_sram_start_marker), \
+					 CONFIG_MM_DRV_PAGE_SIZE)
 
-/**
- * Calculate TLB entry based on physical address.
- *
- * @param pa Page-aligned virutal address.
- * @return TLB entry value.
- */
-static inline uint16_t pa_to_tlb_entry(uintptr_t pa)
-{
-	return (((pa) / CONFIG_MM_DRV_PAGE_SIZE) & TLB_PADDR_MASK);
-}
-
-/**
- * Calculate physical address based on TLB entry.
- *
- * @param tlb_entry TLB entry value.
- * @return physcial address pointer.
- */
-static inline uintptr_t tlb_entry_to_pa(uint16_t tlb_entry)
-{
-	return ((((tlb_entry) & TLB_PADDR_MASK) *
-		CONFIG_MM_DRV_PAGE_SIZE) + TLB_PHYS_BASE);
-}
+/* declare L2 physical memory block */
+SYS_MEM_BLOCKS_DEFINE_WITH_EXT_BUF(
+		L2_PHYS_SRAM_REGION,
+		CONFIG_MM_DRV_PAGE_SIZE,
+		L2_SRAM_PAGES_NUM,
+		(uint8_t *) L2_SRAM_BASE);
 
 /**
  * Calculate the index to the TLB table.
@@ -201,12 +152,27 @@ static int sys_mm_drv_hpsram_pwr(uint32_t bank_idx, bool enable, bool non_blocki
 	return 0;
 }
 
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+static void sys_mm_drv_report_page_usage(void)
+{
+	/* PMC uses 32 KB banks */
+	uint32_t pmc_banks = DIV_ROUND_UP(used_pages, KB(32) / CONFIG_MM_DRV_PAGE_SIZE);
+
+	if (used_pmc_banks_reported != pmc_banks) {
+		if (!adsp_comm_widget_pmc_send_ipc(pmc_banks)) {
+			/* Store reported value if message was sent successfully. */
+			used_pmc_banks_reported = pmc_banks;
+		}
+	}
+}
+#endif
+
 int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 {
 	k_spinlock_key_t key;
 	uint32_t entry_idx, bank_idx;
 	uint16_t entry;
-	uint16_t *tlb_entries = UINT_TO_POINTER(TLB_BASE);
+	volatile uint16_t *tlb_entries = UINT_TO_POINTER(TLB_BASE);
 	int ret = 0;
 	void *phys_block_ptr;
 
@@ -217,8 +183,8 @@ int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 	 * the cached physical address is needed to perform
 	 * bound check.
 	 */
-	uintptr_t pa = POINTER_TO_UINT(z_soc_cached_ptr(UINT_TO_POINTER(phys)));
-	uintptr_t va = POINTER_TO_UINT(z_soc_cached_ptr(virt));
+	uintptr_t pa = POINTER_TO_UINT(sys_cache_cached_ptr_get(UINT_TO_POINTER(phys)));
+	uintptr_t va = POINTER_TO_UINT(sys_cache_cached_ptr_get(virt));
 
 	ARG_UNUSED(flags);
 
@@ -229,7 +195,7 @@ int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 	}
 
 	/* Check bounds of virtual address space */
-	CHECKIF((va < CONFIG_KERNEL_VM_BASE) ||
+	CHECKIF((va < UNUSED_L2_START_ALIGNED) ||
 		(va >= (CONFIG_KERNEL_VM_BASE + CONFIG_KERNEL_VM_SIZE))) {
 		ret = -EINVAL;
 		goto out;
@@ -249,7 +215,7 @@ int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 				 "unable to assign free phys page %d\n", ret);
 			goto out;
 		}
-		pa = POINTER_TO_UINT(z_soc_cached_ptr(phys_block_ptr));
+		pa = POINTER_TO_UINT(sys_cache_cached_ptr_get(phys_block_ptr));
 	}
 
 	/* Check bounds of physical address space */
@@ -269,9 +235,13 @@ int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 
 	entry_idx = get_tlb_entry_idx(va);
 
-	bank_idx = get_hpsram_bank_idx(pa);
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+	used_pages++;
+	sys_mm_drv_report_page_usage();
+#endif
 
-	if (!hpsram_ref[bank_idx]++) {
+	bank_idx = get_hpsram_bank_idx(pa);
+	if (sys_mm_drv_bank_page_mapped(&hpsram_bank[bank_idx]) == 1) {
 		sys_mm_drv_hpsram_pwr(bank_idx, true, false);
 	}
 
@@ -302,7 +272,7 @@ int sys_mm_drv_map_page(void *virt, uintptr_t phys, uint32_t flags)
 	 * Invalid the cache of the newly mapped virtual page to
 	 * avoid stale data.
 	 */
-	z_xtensa_cache_inv(virt, CONFIG_MM_DRV_PAGE_SIZE);
+	sys_cache_data_invd_range(virt, CONFIG_MM_DRV_PAGE_SIZE);
 
 	k_spin_unlock(&tlb_lock, key);
 
@@ -326,7 +296,7 @@ int sys_mm_drv_map_region(void *virt, uintptr_t phys,
 		goto out;
 	}
 
-	va = (uint8_t *)z_soc_cached_ptr(virt);
+	va = (__sparse_force uint8_t *)sys_cache_cached_ptr_get(virt);
 	pa = phys;
 
 	key = k_spin_lock(&sys_mm_drv_common_lock);
@@ -354,7 +324,7 @@ out:
 int sys_mm_drv_map_array(void *virt, uintptr_t *phys,
 			 size_t cnt, uint32_t flags)
 {
-	void *va = z_soc_cached_ptr(virt);
+	void *va = (__sparse_force void *)sys_cache_cached_ptr_get(virt);
 
 	return sys_mm_drv_simple_map_array(va, phys, cnt, flags);
 }
@@ -368,10 +338,10 @@ int sys_mm_drv_unmap_page(void *virt)
 	int ret = 0;
 
 	/* Use cached virtual address */
-	uintptr_t va = POINTER_TO_UINT(z_soc_cached_ptr(virt));
+	uintptr_t va = POINTER_TO_UINT(sys_cache_cached_ptr_get(virt));
 
 	/* Check bounds of virtual address space */
-	CHECKIF((va < CONFIG_KERNEL_VM_BASE) ||
+	CHECKIF((va < UNUSED_L2_START_ALIGNED) ||
 		(va >= (CONFIG_KERNEL_VM_BASE + CONFIG_KERNEL_VM_SIZE))) {
 		ret = -EINVAL;
 		goto out;
@@ -389,23 +359,28 @@ int sys_mm_drv_unmap_page(void *virt)
 	 * Flush the cache to make sure the backing physical page
 	 * has the latest data.
 	 */
-	z_xtensa_cache_flush(virt, CONFIG_MM_DRV_PAGE_SIZE);
+	sys_cache_data_flush_range(virt, CONFIG_MM_DRV_PAGE_SIZE);
 
 	entry_idx = get_tlb_entry_idx(va);
-
-	/* Simply clear the enable bit */
-	tlb_entries[entry_idx] &= ~TLB_ENABLE_BIT;
-
 	pa = tlb_entry_to_pa(tlb_entries[entry_idx]);
 
-	/* Check bounds of physical address space. */
-	/* Initial TLB mappings could point to non existing physical pages. */
+	/* Restore default entry settings with cleared the enable bit. */
+	tlb_entries[entry_idx] = 0;
+
+	/* Check bounds of physical address space.
+	 * Initial TLB mappings could point to non existing physical pages.
+	 */
 	if ((pa >= L2_SRAM_BASE) && (pa < (L2_SRAM_BASE + L2_SRAM_SIZE))) {
 		sys_mem_blocks_free_contiguous(&L2_PHYS_SRAM_REGION,
 					       UINT_TO_POINTER(pa), 1);
 
 		bank_idx = get_hpsram_bank_idx(pa);
-		if (--hpsram_ref[bank_idx] == 0) {
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+		used_pages--;
+		sys_mm_drv_report_page_usage();
+#endif
+
+		if (sys_mm_drv_bank_page_unmapped(&hpsram_bank[bank_idx]) == SRAM_BANK_PAGE_NUM) {
 			sys_mm_drv_hpsram_pwr(bank_idx, false, false);
 		}
 	}
@@ -418,9 +393,52 @@ out:
 
 int sys_mm_drv_unmap_region(void *virt, size_t size)
 {
-	void *va = z_soc_cached_ptr(virt);
+	void *va = (__sparse_force void *)sys_cache_cached_ptr_get(virt);
 
 	return sys_mm_drv_simple_unmap_region(va, size);
+}
+
+int sys_mm_drv_update_page_flags(void *virt, uint32_t flags)
+{
+	k_spinlock_key_t key;
+	uint32_t entry_idx;
+	uint16_t entry;
+	uint16_t *tlb_entries = UINT_TO_POINTER(TLB_BASE);
+	int ret = 0;
+
+	/* Use cached virtual address */
+	uintptr_t va = POINTER_TO_UINT(sys_cache_cached_ptr_get(virt));
+
+	/* Make sure inputs are page-aligned and check bounds of virtual address space */
+	CHECKIF(!sys_mm_drv_is_addr_aligned(va) ||
+		(va < UNUSED_L2_START_ALIGNED) ||
+		(va >= (CONFIG_KERNEL_VM_BASE + CONFIG_KERNEL_VM_SIZE))) {
+		return -EINVAL;
+	}
+
+	key = k_spin_lock(&tlb_lock);
+
+	entry_idx = get_tlb_entry_idx(va);
+
+	entry = tlb_entries[entry_idx];
+
+	/* Check entry is already mapped */
+	if (!(entry & TLB_ENABLE_BIT)) {
+		ret = -EFAULT;
+		goto out;
+	}
+
+	/* Clear the access flags */
+	entry &= ~(TLB_EXEC_BIT | TLB_WRITE_BIT);
+
+	/* Set new permissions for this entry */
+	entry |= flags_to_tlb_perms(flags);
+
+	tlb_entries[entry_idx] = entry;
+
+out:
+	k_spin_unlock(&tlb_lock, key);
+	return ret;
 }
 
 int sys_mm_drv_page_phys_get(void *virt, uintptr_t *phys)
@@ -430,7 +448,7 @@ int sys_mm_drv_page_phys_get(void *virt, uintptr_t *phys)
 	int ret = 0;
 
 	/* Use cached address */
-	uintptr_t va = POINTER_TO_UINT(z_soc_cached_ptr(virt));
+	uintptr_t va = POINTER_TO_UINT(sys_cache_cached_ptr_get(virt));
 
 	CHECKIF(!sys_mm_drv_is_addr_aligned(va)) {
 		ret = -EINVAL;
@@ -471,7 +489,7 @@ int sys_mm_drv_page_flag_get(void *virt, uint32_t *flags)
 	uint16_t ent;
 
 	/* Use cached address */
-	uintptr_t va = POINTER_TO_UINT(z_soc_cached_ptr(virt));
+	uintptr_t va = POINTER_TO_UINT(sys_cache_cached_ptr_get(virt));
 
 	CHECKIF(!sys_mm_drv_is_addr_aligned(va)) {
 		ret = -EINVAL;
@@ -509,8 +527,8 @@ out:
 int sys_mm_drv_remap_region(void *virt_old, size_t size,
 			    void *virt_new)
 {
-	void *va_new = z_soc_cached_ptr(virt_new);
-	void *va_old = z_soc_cached_ptr(virt_old);
+	void *va_new = (__sparse_force void *)sys_cache_cached_ptr_get(virt_new);
+	void *va_old = (__sparse_force void *)sys_cache_cached_ptr_get(virt_old);
 
 	return sys_mm_drv_simple_remap_region(va_old, size, va_new);
 }
@@ -522,8 +540,8 @@ int sys_mm_drv_move_region(void *virt_old, size_t size, void *virt_new,
 	size_t offset;
 	int ret = 0;
 
-	virt_new = z_soc_cached_ptr(virt_new);
-	virt_old = z_soc_cached_ptr(virt_old);
+	virt_new = (__sparse_force void *)sys_cache_cached_ptr_get(virt_new);
+	virt_old = (__sparse_force void *)sys_cache_cached_ptr_get(virt_old);
 
 	CHECKIF(!sys_mm_drv_is_virt_addr_aligned(virt_old) ||
 		!sys_mm_drv_is_virt_addr_aligned(virt_new) ||
@@ -609,8 +627,8 @@ out:
 	 * flush the cache to make sure the backing physical
 	 * pages have the new data.
 	 */
-	z_xtensa_cache_flush(virt_new, size);
-	z_xtensa_cache_flush_inv(virt_old, size);
+	sys_cache_data_flush_range(virt_new, size);
+	sys_cache_data_flush_and_invd_range(virt_old, size);
 
 	return ret;
 }
@@ -620,8 +638,8 @@ int sys_mm_drv_move_array(void *virt_old, size_t size, void *virt_new,
 {
 	int ret;
 
-	void *va_new = z_soc_cached_ptr(virt_new);
-	void *va_old = z_soc_cached_ptr(virt_old);
+	void *va_new = (__sparse_force void *)sys_cache_cached_ptr_get(virt_new);
+	void *va_old = (__sparse_force void *)sys_cache_cached_ptr_get(virt_old);
 
 	ret = sys_mm_drv_simple_move_array(va_old, size, va_new,
 					    phys_new, phys_cnt);
@@ -631,7 +649,7 @@ int sys_mm_drv_move_array(void *virt_old, size_t size, void *virt_new,
 	 * flush the cache to make sure the backing physical
 	 * pages have the new data.
 	 */
-	z_xtensa_cache_flush(va_new, size);
+	sys_cache_data_flush_range(va_new, size);
 
 	return ret;
 }
@@ -642,6 +660,19 @@ static int sys_mm_drv_mm_init(const struct device *dev)
 
 	ARG_UNUSED(dev);
 
+	/*
+	 * Change size of avalible physical memory according to fw register information
+	 * in runtime.
+	 */
+
+	uint32_t avalible_memory_size = ace_hpsram_get_bank_count() * SRAM_BANK_SIZE;
+
+	L2_PHYS_SRAM_REGION.info.num_blocks = avalible_memory_size / CONFIG_MM_DRV_PAGE_SIZE;
+
+	ret = calculate_memory_regions(UNUSED_L2_START_ALIGNED);
+	CHECKIF(ret != 0) {
+		return ret;
+	}
 	/*
 	 * Initialize memblocks that will store physical
 	 * page usage. Initially all physical pages are
@@ -662,22 +693,24 @@ static int sys_mm_drv_mm_init(const struct device *dev)
 	 * of pages within single memory bank.
 	 */
 	for (int i = 0; i < L2_SRAM_BANK_NUM; i++) {
-		hpsram_ref[i] = SRAM_BANK_SIZE / CONFIG_MM_DRV_PAGE_SIZE;
+		sys_mm_drv_bank_init(&hpsram_bank[i],
+				     SRAM_BANK_PAGE_NUM);
 	}
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+	used_pages = L2_SRAM_BANK_NUM * SRAM_BANK_SIZE / CONFIG_MM_DRV_PAGE_SIZE;
+#endif
 
+#ifdef CONFIG_MM_DRV_INTEL_ADSP_TLB_REMAP_UNUSED_RAM
 	/*
 	 * find virtual address range which are unused
 	 * in the system
 	 */
-	uintptr_t unused_l2_start_aligned =
-		ROUND_UP(POINTER_TO_UINT(&unused_l2_sram_start_marker),
-					 CONFIG_MM_DRV_PAGE_SIZE);
+	if (L2_SRAM_BASE + L2_SRAM_SIZE < UNUSED_L2_START_ALIGNED ||
+	    L2_SRAM_BASE > UNUSED_L2_START_ALIGNED) {
 
-	if (unused_l2_start_aligned < L2_SRAM_BASE ||
-	    unused_l2_start_aligned > L2_SRAM_BASE + L2_SRAM_SIZE) {
 		__ASSERT(false,
 			 "unused l2 pointer is outside of l2 sram range %p\n",
-			 unused_l2_start_aligned);
+			 (void *)UNUSED_L2_START_ALIGNED);
 		return -EFAULT;
 	}
 
@@ -686,12 +719,161 @@ static int sys_mm_drv_mm_init(const struct device *dev)
 	 * virtual address space to save power
 	 */
 	size_t unused_size = CONFIG_KERNEL_VM_BASE + CONFIG_KERNEL_VM_SIZE -
-			     unused_l2_start_aligned;
+			     UNUSED_L2_START_ALIGNED;
 
-	ret = sys_mm_drv_unmap_region(UINT_TO_POINTER(unused_l2_start_aligned),
+	ret = sys_mm_drv_unmap_region(UINT_TO_POINTER(UNUSED_L2_START_ALIGNED),
 				      unused_size);
+
+	/* Need to reset max pages statistics after unmap */
+	for (int i = 0; i < L2_SRAM_BANK_NUM; i++) {
+		sys_mm_drv_bank_stats_reset_max(&hpsram_bank[i]);
+	}
+#endif
+
+	/*
+	 * Notify PMC about used HP-SRAM pages.
+	 */
+#ifdef CONFIG_SOC_INTEL_COMM_WIDGET
+	sys_mm_drv_report_page_usage();
+#endif
 
 	return 0;
 }
 
-SYS_INIT(sys_mm_drv_mm_init, POST_KERNEL, 0);
+static void adsp_mm_save_context(void *storage_buffer)
+{
+	uint16_t entry;
+	uint32_t entry_idx;
+	int page_idx;
+	uint32_t phys_addr;
+	volatile uint16_t *tlb_entries = UINT_TO_POINTER(TLB_BASE);
+	uint8_t *location = (uint8_t *) storage_buffer;
+
+	/* first, store the existing TLB */
+	memcpy(location, UINT_TO_POINTER(TLB_BASE), TLB_SIZE);
+	location += TLB_SIZE;
+
+	/* save context of all the pages */
+	for (page_idx = 0; page_idx < L2_SRAM_PAGES_NUM; page_idx++) {
+		phys_addr = POINTER_TO_UINT(L2_SRAM_BASE) +
+				CONFIG_MM_DRV_PAGE_SIZE * page_idx;
+		if (sys_mem_blocks_is_region_free(
+				&L2_PHYS_SRAM_REGION,
+				UINT_TO_POINTER(phys_addr), 1)) {
+			/* skip a free page */
+			continue;
+		}
+
+		/* map the physical addr 1:1 to virtual address */
+		entry_idx = get_tlb_entry_idx(phys_addr);
+		entry = pa_to_tlb_entry(phys_addr);
+
+		if (((tlb_entries[entry_idx] & TLB_PADDR_MASK) != entry) ||
+		    ((tlb_entries[entry_idx] & TLB_ENABLE_BIT) != TLB_ENABLE_BIT)) {
+			/* this page needs remapping, invalidate cache to avoid stalled data
+			 * all cache data has been flushed before
+			 * do this for pages to remap only
+			 */
+			sys_cache_data_invd_range(UINT_TO_POINTER(phys_addr),
+						  CONFIG_MM_DRV_PAGE_SIZE);
+
+			/* Enable the translation in the TLB entry */
+			entry |= TLB_ENABLE_BIT;
+
+			/* map the page 1:1 virtual to physical */
+			tlb_entries[entry_idx] = entry;
+		}
+
+		/* save physical address */
+		*((uint32_t *) location) = phys_addr;
+		location += sizeof(uint32_t);
+
+		/* save the page */
+		memcpy(location,
+			UINT_TO_POINTER(phys_addr),
+			CONFIG_MM_DRV_PAGE_SIZE);
+		location += CONFIG_MM_DRV_PAGE_SIZE;
+	}
+
+	/* write end marker - a null address */
+	*((uint32_t *) location) = 0;
+	location += sizeof(uint32_t);
+
+	sys_cache_data_flush_range(
+		storage_buffer,
+		(uint32_t)location - (uint32_t)storage_buffer);
+
+
+	/* system state is frozen, ready to poweroff, no further changes will be stored */
+}
+
+__imr void adsp_mm_restore_context(void *storage_buffer)
+{
+	/* at this point system must be in a startup state
+	 * TLB must be set to initial state
+	 * Note! the stack must NOT be in the area being restored
+	 */
+	uint32_t phys_addr;
+	uint8_t *location;
+
+	/* restore context of all the pages */
+	location = (uint8_t *) storage_buffer + TLB_SIZE;
+
+	phys_addr = *((uint32_t *) location);
+
+	while (phys_addr != 0) {
+		uint32_t phys_addr_uncached =
+				POINTER_TO_UINT(sys_cache_uncached_ptr_get(
+					(void __sparse_cache *)UINT_TO_POINTER(phys_addr)));
+		uint32_t phys_offset = phys_addr - L2_SRAM_BASE;
+		uint32_t bank_idx = (phys_offset / SRAM_BANK_SIZE);
+
+		location += sizeof(uint32_t);
+
+		/* turn on memory bank power, wait till the power is on */
+		__ASSERT_NO_MSG(bank_idx <= ace_hpsram_get_bank_count());
+		HPSRAM_REGS(bank_idx)->HSxPGCTL = 0;
+		while (HPSRAM_REGS(bank_idx)->HSxPGISTS == 1) {
+			/* k_busy_wait cannot be used here - not available */
+		}
+
+		/* copy data to uncached alias and invalidate cache */
+		bmemcpy(UINT_TO_POINTER(phys_addr_uncached),
+			location,
+			CONFIG_MM_DRV_PAGE_SIZE);
+		sys_cache_data_invd_range(UINT_TO_POINTER(phys_addr), CONFIG_MM_DRV_PAGE_SIZE);
+
+		location += CONFIG_MM_DRV_PAGE_SIZE;
+		phys_addr = *((uint32_t *) location);
+	}
+
+	/* restore original TLB table */
+	bmemcpy(UINT_TO_POINTER(TLB_BASE), storage_buffer, TLB_SIZE);
+
+	/* HPSRAM memory is restored */
+}
+
+static uint32_t adsp_mm_get_storage_size(void)
+{
+	/*
+	 * FIXME - currently the function returns a maximum possible size of the buffer
+	 * as L3 memory is generally a huge area its OK (and fast)
+	 * in future the function may go through the mapping and calculate a required size
+	 */
+	return	L2_SRAM_SIZE + TLB_SIZE + (L2_SRAM_PAGES_NUM * sizeof(void *))
+		+ sizeof(void *);
+}
+
+static const struct intel_adsp_tlb_api adsp_tlb_api_func = {
+	.save_context = adsp_mm_save_context,
+	.get_storage_size = adsp_mm_get_storage_size
+};
+
+DEVICE_DT_DEFINE(DT_INST(0, intel_adsp_mtl_tlb),
+		sys_mm_drv_mm_init,
+		NULL,
+		NULL,
+		NULL,
+		POST_KERNEL,
+		0,
+		&adsp_tlb_api_func);

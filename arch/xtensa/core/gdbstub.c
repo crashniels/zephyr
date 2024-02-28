@@ -9,7 +9,7 @@
 #include <zephyr/toolchain.h>
 #include <zephyr/debug/gdbstub.h>
 
-#include <xtensa-asm2-context.h>
+#include <xtensa_asm2_context.h>
 #include <xtensa/corebits.h>
 
 static bool not_first_break;
@@ -518,7 +518,7 @@ static void restore_from_ctx(struct gdb_ctx *ctx, const z_arch_esf_t *stack)
 	struct xtensa_register *reg;
 	int idx, num_laddr_regs;
 
-	uint32_t *bsa = *(int **)stack;
+	_xtensa_irq_bsa_t *bsa = (void *)*(int **)stack;
 
 	if ((int *)bsa - stack > 4) {
 		num_laddr_regs = 8;
@@ -577,7 +577,7 @@ static void restore_from_ctx(struct gdb_ctx *ctx, const z_arch_esf_t *stack)
 		 * which raises debug interrupt, and we will be
 		 * stuck in an infinite loop.
 		 */
-		bsa[BSA_PC_OFF / 4] += 2;
+		bsa->pc += 2;
 		not_first_break = true;
 	}
 }
@@ -972,8 +972,7 @@ void arch_gdb_init(void)
 	 * after level-1 interrupts is for level-2 interrupt.
 	 * So need to do an offset by subtraction.
 	 */
-	z_xtensa_irq_enable(XCHAL_NUM_EXTINTERRUPTS +
-			    XCHAL_DEBUGLEVEL - 2);
+	xtensa_irq_enable(XCHAL_NUM_EXTINTERRUPTS + XCHAL_DEBUGLEVEL - 2);
 
 	/*
 	 * Break and go into the GDB stub.

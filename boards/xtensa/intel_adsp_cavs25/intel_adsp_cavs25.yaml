@@ -7,7 +7,9 @@ toolchain:
   - zephyr
 supported:
   - dma
+  - dai
 testing:
   ignore_tags:
-     - net
-     - bluetooth
+    - net
+    - bluetooth
+vendor: intel

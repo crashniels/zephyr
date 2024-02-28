@@ -37,12 +37,12 @@ static struct k_spinlock lock;
  * forbidden.
  */
 #ifdef CONFIG_USERSPACE
-#include <zephyr/syscall_handler.h>
+#include <zephyr/internal/syscall_handler.h>
 
 #define ATOMIC_SYSCALL_HANDLER_TARGET(name) \
 	static inline atomic_val_t z_vrfy_##name(atomic_t *target) \
 	{								\
-		Z_OOPS(Z_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t))); \
+		K_OOPS(K_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t))); \
 		return z_impl_##name((atomic_t *)target); \
 	}
 
@@ -50,7 +50,7 @@ static struct k_spinlock lock;
 	static inline atomic_val_t z_vrfy_##name(atomic_t *target, \
 						 atomic_val_t value) \
 	{								\
-		Z_OOPS(Z_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t))); \
+		K_OOPS(K_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t))); \
 		return z_impl_##name((atomic_t *)target, value); \
 	}
 #else
@@ -84,6 +84,14 @@ bool z_impl_atomic_cas(atomic_t *target, atomic_val_t old_value,
 	k_spinlock_key_t key;
 	int ret = false;
 
+	/*
+	 * On SMP the k_spin_lock() definition calls atomic_cas().
+	 * Using k_spin_lock() here would create an infinite loop and
+	 * massive stack overflow. Consider CONFIG_ATOMIC_OPERATIONS_ARCH
+	 * or CONFIG_ATOMIC_OPERATIONS_BUILTIN instead.
+	 */
+	BUILD_ASSERT(!IS_ENABLED(CONFIG_SMP));
+
 	key = k_spin_lock(&lock);
 
 	if (*target == old_value) {
@@ -100,7 +108,7 @@ bool z_impl_atomic_cas(atomic_t *target, atomic_val_t old_value,
 bool z_vrfy_atomic_cas(atomic_t *target, atomic_val_t old_value,
 		       atomic_val_t new_value)
 {
-	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t)));
+	K_OOPS(K_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_t)));
 
 	return z_impl_atomic_cas((atomic_t *)target, old_value, new_value);
 }
@@ -130,7 +138,7 @@ static inline bool z_vrfy_atomic_ptr_cas(atomic_ptr_t *target,
 					 atomic_ptr_val_t old_value,
 					 atomic_ptr_val_t new_value)
 {
-	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_ptr_t)));
+	K_OOPS(K_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_ptr_t)));
 
 	return z_impl_atomic_ptr_cas(target, old_value, new_value);
 }
@@ -268,7 +276,7 @@ atomic_ptr_val_t z_impl_atomic_ptr_set(atomic_ptr_t *target,
 static inline atomic_ptr_val_t z_vrfy_atomic_ptr_set(atomic_ptr_t *target,
 						     atomic_ptr_val_t value)
 {
-	Z_OOPS(Z_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_ptr_t)));
+	K_OOPS(K_SYSCALL_MEMORY_WRITE(target, sizeof(atomic_ptr_t)));
 
 	return z_impl_atomic_ptr_set(target, value);
 }

@@ -9,6 +9,11 @@ static inline void feature_unmask_features(struct ll_conn *conn, uint64_t ll_fea
 	conn->llcp.fex.features_used &= ~ll_feat_mask;
 }
 
+static inline void feature_unmask_peer_features(struct ll_conn *conn, uint64_t ll_feat_mask)
+{
+	conn->llcp.fex.features_peer &= ~ll_feat_mask;
+}
+
 static inline bool feature_le_encryption(struct ll_conn *conn)
 {
 #if defined(CONFIG_BT_CTLR_LE_ENC)
@@ -120,7 +125,16 @@ static inline bool feature_phy_coded(struct ll_conn *conn)
 static inline bool feature_cte_req(struct ll_conn *conn)
 {
 #if defined(CONFIG_BT_CTLR_DF) && defined(CONFIG_BT_CTLR_DF_CONN_CTE_REQ)
-	return conn->llcp.fex.features_used & LL_FEAT_BIT_CONNECTION_CTE_REQ;
+	return (conn->llcp.fex.features_used & LL_FEAT_BIT_CONNECTION_CTE_REQ) != 0;
+#else
+	return 0;
+#endif
+}
+
+static inline bool feature_sca(struct ll_conn *conn)
+{
+#if defined(CONFIG_BT_CTLR_SCA_UPDATE)
+	return (conn->llcp.fex.features_used & LL_FEAT_BIT_SCA_UPDATE) != 0;
 #else
 	return 0;
 #endif
@@ -150,6 +164,26 @@ static inline bool feature_peer_smi_tx(struct ll_conn *conn)
 	return (conn->llcp.fex.features_peer & BIT64(BT_LE_FEAT_BIT_SMI_TX)) != 0;
 }
 
+static inline bool feature_peer_iso_central(struct ll_conn *conn)
+{
+	return (conn->llcp.fex.features_peer & BIT64(BT_LE_FEAT_BIT_CIS_CENTRAL)) != 0;
+}
+
+static inline bool feature_iso_central(struct ll_conn *conn)
+{
+	return LL_FEAT_BIT_CIS_CENTRAL != 0;
+}
+
+static inline bool feature_peer_iso_peripheral(struct ll_conn *conn)
+{
+	return (conn->llcp.fex.features_peer & BIT64(BT_LE_FEAT_BIT_CIS_PERIPHERAL)) != 0;
+}
+
+static inline bool feature_iso_peripheral(struct ll_conn *conn)
+{
+	return LL_FEAT_BIT_CIS_PERIPHERAL != 0;
+}
+
 /*
  * The following features are not yet defined in KConfig and do
  * not have a bitfield defined in ll_feat.h
@@ -162,7 +196,6 @@ static inline bool feature_peer_smi_tx(struct ll_conn *conn)
  * tone_ext
  * per_adv_sync_tx
  * per_adv_sync_rx
- * sleep_upd
  * rpk_valid
  * iso_central
  * iso_periph

@@ -83,7 +83,7 @@ def process_line(line, fp):
         return
 
     # Set the lookup function to static inline so it gets rolled into
-    # z_object_find(), nothing else will use it
+    # k_object_find(), nothing else will use it
     if re.search(args.pattern + " [*]$", line):
         fp.write("static inline " + line)
         return
@@ -134,7 +134,8 @@ def parse_args():
 
     parser = argparse.ArgumentParser(
         description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False)
 
     parser.add_argument("-i", "--input", required=True,
                         help="Input C file from gperf")

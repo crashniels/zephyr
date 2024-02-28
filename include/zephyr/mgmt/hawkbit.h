@@ -7,7 +7,7 @@
 /**
  * @brief hawkBit Firmware Over-the-Air for Zephyr Project.
  * @defgroup hawkbit hawkBit Firmware Over-the-Air
- * @ingroup lib
+ * @ingroup third_party
  * @{
  */
 #ifndef ZEPHYR_INCLUDE_MGMT_HAWKBIT_H_
@@ -26,6 +26,7 @@
 enum hawkbit_response {
 	HAWKBIT_NETWORKING_ERROR,
 	HAWKBIT_UNCONFIRMED_IMAGE,
+	HAWKBIT_PERMISSION_ERROR,
 	HAWKBIT_METADATA_ERROR,
 	HAWKBIT_DOWNLOAD_ERROR,
 	HAWKBIT_OK,

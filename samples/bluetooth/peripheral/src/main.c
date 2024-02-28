@@ -31,13 +31,13 @@
 #define BT_UUID_CUSTOM_SERVICE_VAL \
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0)
 
-static struct bt_uuid_128 vnd_uuid = BT_UUID_INIT_128(
+static const struct bt_uuid_128 vnd_uuid = BT_UUID_INIT_128(
 	BT_UUID_CUSTOM_SERVICE_VAL);
 
-static struct bt_uuid_128 vnd_enc_uuid = BT_UUID_INIT_128(
+static const struct bt_uuid_128 vnd_enc_uuid = BT_UUID_INIT_128(
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1));
 
-static struct bt_uuid_128 vnd_auth_uuid = BT_UUID_INIT_128(
+static const struct bt_uuid_128 vnd_auth_uuid = BT_UUID_INIT_128(
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef2));
 
 #define VND_MAX_LEN 20
@@ -346,7 +346,7 @@ static void hrs_notify(void)
 	bt_hrs_notify(heartrate);
 }
 
-void main(void)
+int main(void)
 {
 	struct bt_gatt_attr *vnd_ind_attr;
 	char str[BT_UUID_STR_LEN];
@@ -355,7 +355,7 @@ void main(void)
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
-		return;
+		return 0;
 	}
 
 	bt_ready();
@@ -400,4 +400,5 @@ void main(void)
 			}
 		}
 	}
+	return 0;
 }

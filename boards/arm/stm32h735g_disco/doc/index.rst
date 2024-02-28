@@ -63,7 +63,17 @@ The current Zephyr stm32h735g_disco board configuration supports the following h
 +-----------+------------+-------------------------------------+
 | FMC       | on-chip    | memc (SDRAM)                        |
 +-----------+------------+-------------------------------------+
-
+| ADC       | on-chip    | ADC Controller                      |
++-----------+------------+-------------------------------------+
+| FDCAN1    | on-chip    | CAN-FD Controller                   |
++-----------+------------+-------------------------------------+
+| FDCAN2    | on-chip    | CAN-FD Controller                   |
++-----------+------------+-------------------------------------+
+| FDCAN2    | on-chip    | CAN-FD Controller (disabled by      |
+|           |            | default. Solder bridges SB29 and    |
+|           |            | SB30 need to be closed for FDCAN3   |
+|           |            | to work)                            |
++-----------+------------+-------------------------------------+
 
 Other hardware features are not yet supported on Zephyr porting.
 
@@ -73,7 +83,7 @@ The default configuration per core can be found in the defconfig file:
 Pin Mapping
 ===========
 
-For mode details please refer to `STM32H735G-DISCO website`_.
+For more details please refer to `STM32H735G-DISCO website`_.
 
 Default Zephyr Peripheral Mapping:
 ----------------------------------
@@ -82,6 +92,7 @@ Default Zephyr Peripheral Mapping:
 - UART_7 TX/RX : PF7/PF6 (Arduino Serial)
 - LD1 : PC2
 - LD2 : PC3
+- FDCAN1 : CAN
 
 System Clock
 ============

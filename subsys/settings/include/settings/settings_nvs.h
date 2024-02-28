@@ -38,6 +38,16 @@ struct settings_nvs {
 	struct nvs_fs cf_nvs;
 	uint16_t last_name_id;
 	const struct device *flash_dev;
+#if CONFIG_SETTINGS_NVS_NAME_CACHE
+	struct {
+		uint16_t name_hash;
+		uint16_t name_id;
+	} cache[CONFIG_SETTINGS_NVS_NAME_CACHE_SIZE];
+
+	uint16_t cache_next;
+	uint16_t cache_total;
+	bool loaded;
+#endif
 };
 
 /* register nvs to be a source of settings */

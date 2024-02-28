@@ -145,6 +145,17 @@ struct adc_channel_cfg {
 	 */
 	uint8_t input_negative;
 #endif /* CONFIG_ADC_CONFIGURABLE_INPUTS */
+
+#ifdef CONFIG_ADC_CONFIGURABLE_EXCITATION_CURRENT_SOURCE_PIN
+	uint8_t current_source_pin_set : 1;
+	/**
+	 * Output pin for the current sources.
+	 * This is only available if the driver enables this feature
+	 * via the hidden configuration option ADC_CONFIGURABLE_EXCITATION_CURRENT_SOURCE_PIN.
+	 * The meaning itself is then defined by the driver itself.
+	 */
+	uint8_t current_source_pin[2];
+#endif /* CONFIG_ADC_CONFIGURABLE_EXCITATION_CURRENT_SOURCE_PIN */
 };
 
 /**
@@ -217,11 +228,14 @@ struct adc_channel_cfg {
 	.acquisition_time = DT_PROP(node_id, zephyr_acquisition_time), \
 	.channel_id       = DT_REG_ADDR(node_id), \
 IF_ENABLED(CONFIG_ADC_CONFIGURABLE_INPUTS, \
-	(COND_CODE_1(DT_NODE_HAS_PROP(node_id, zephyr_input_negative), \
-		(.differential   = true, \
-		 .input_positive = DT_PROP(node_id, zephyr_input_positive), \
-		 .input_negative = DT_PROP(node_id, zephyr_input_negative),), \
-		(.input_positive = DT_PROP(node_id, zephyr_input_positive),)))) \
+	(.differential    = DT_NODE_HAS_PROP(node_id, zephyr_input_negative), \
+	 .input_positive  = DT_PROP_OR(node_id, zephyr_input_positive, 0), \
+	 .input_negative  = DT_PROP_OR(node_id, zephyr_input_negative, 0),)) \
+IF_ENABLED(DT_PROP(node_id, zephyr_differential), \
+	(.differential    = true,)) \
+IF_ENABLED(CONFIG_ADC_CONFIGURABLE_EXCITATION_CURRENT_SOURCE_PIN, \
+	(.current_source_pin_set = DT_NODE_HAS_PROP(node_id, zephyr_current_source_pin), \
+	 .current_source_pin = DT_PROP_OR(node_id, zephyr_current_source_pin, {0}),)) \
 }
 
 /**
@@ -501,6 +515,7 @@ struct adc_sequence {
 	 * of this sequence.
 	 * All selected channels must be configured with adc_channel_setup()
 	 * before they are used in a sequence.
+	 * The least significant bit corresponds to channel 0.
 	 */
 	uint32_t channels;
 
@@ -509,6 +524,8 @@ struct adc_sequence {
 	 * from subsequent samplings are written sequentially in the buffer.
 	 * The number of samples written for each sampling is determined by
 	 * the number of channels selected in the "channels" field.
+	 * The values written to the buffer represent a sample from each
+	 * selected channel starting from the one with the lowest ID.
 	 * The buffer must be of an appropriate size, taking into account
 	 * the number of selected channels and the ADC resolution used,
 	 * as well as the number of samplings contained in the sequence.
@@ -662,6 +679,21 @@ static inline int z_impl_adc_read(const struct device *dev,
 				(const struct adc_driver_api *)dev->api;
 
 	return api->read(dev, sequence);
+}
+
+/**
+ * @brief Set a read request from a struct adc_dt_spec.
+ *
+ * @param spec ADC specification from Devicetree.
+ * @param sequence  Structure specifying requested sequence of samplings.
+ *
+ * @return A value from adc_read().
+ * @see adc_read()
+ */
+static inline int adc_read_dt(const struct adc_dt_spec *spec,
+			      const struct adc_sequence *sequence)
+{
+	return adc_read(spec->dev, sequence);
 }
 
 /**
@@ -829,6 +861,18 @@ static inline int adc_sequence_init_dt(const struct adc_dt_spec *spec,
 	seq->oversampling = spec->oversampling;
 
 	return 0;
+}
+
+/**
+ * @brief Validate that the ADC device is ready.
+ *
+ * @param spec ADC specification from devicetree
+ *
+ * @retval true if the ADC device is ready for use and false otherwise.
+ */
+static inline bool adc_is_ready_dt(const struct adc_dt_spec *spec)
+{
+	return device_is_ready(spec->dev);
 }
 
 /**

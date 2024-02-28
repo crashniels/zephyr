@@ -19,4 +19,8 @@ supported:
   - adc
   - watchdog
   - nvs
+  - backup_sram
   - pwm
+  - counter
+  - i2c
+vendor: st

@@ -7,7 +7,7 @@ endif()
 
 board_set_flasher_ifnset(intel_adsp)
 
-set(RIMAGE_SIGN_KEY otc_private_key_3k.pem)
+set(RIMAGE_SIGN_KEY "otc_private_key_3k.pem" CACHE STRING "default in cavs25/board.cmake")
 
 if(CONFIG_BOARD_INTEL_ADSP_CAVS25)
 board_set_rimage_target(tgl)
@@ -17,4 +17,4 @@ if(CONFIG_BOARD_INTEL_ADSP_CAVS25_TGPH)
 board_set_rimage_target(tgl-h)
 endif()
 
-include(${ZEPHYR_BASE}/boards/common/intel_adsp.board.cmake)
+board_finalize_runner_args(intel_adsp)

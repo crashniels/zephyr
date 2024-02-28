@@ -26,12 +26,12 @@ static int lps22hh_enable_int(const struct device *dev, int enable)
 {
 	const struct lps22hh_config * const cfg = dev->config;
 	stmdev_ctx_t *ctx = (stmdev_ctx_t *)&cfg->ctx;
-	lps22hh_reg_t int_route;
+	lps22hh_pin_int_route_t int_route;
 
 	/* set interrupt */
-	lps22hh_pin_int_route_get(ctx, &int_route.ctrl_reg3);
-	int_route.ctrl_reg3.drdy = enable;
-	return lps22hh_pin_int_route_set(ctx, &int_route.ctrl_reg3);
+	lps22hh_pin_int_route_get(ctx, &int_route);
+	int_route.drdy_pres = enable;
+	return lps22hh_pin_int_route_set(ctx, &int_route);
 }
 
 /**
@@ -48,6 +48,7 @@ int lps22hh_trigger_set(const struct device *dev,
 
 	if (trig->chan == SENSOR_CHAN_ALL) {
 		lps22hh->handler_drdy = handler;
+		lps22hh->data_ready_trigger = trig;
 		if (handler) {
 			/* dummy read: re-trigger interrupt */
 			if (lps22hh_pressure_raw_get(ctx, &raw_press) < 0) {
@@ -72,12 +73,9 @@ static void lps22hh_handle_interrupt(const struct device *dev)
 	int ret;
 	struct lps22hh_data *lps22hh = dev->data;
 	const struct lps22hh_config *cfg = dev->config;
-	struct sensor_trigger drdy_trigger = {
-		.type = SENSOR_TRIG_DATA_READY,
-	};
 
 	if (lps22hh->handler_drdy != NULL) {
-		lps22hh->handler_drdy(dev, &drdy_trigger);
+		lps22hh->handler_drdy(dev, lps22hh->data_ready_trigger);
 	}
 
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(i3c)
@@ -125,8 +123,13 @@ static void lps22hh_gpio_callback(const struct device *dev,
 }
 
 #ifdef CONFIG_LPS22HH_TRIGGER_OWN_THREAD
-static void lps22hh_thread(struct lps22hh_data *lps22hh)
+static void lps22hh_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct lps22hh_data *lps22hh = p1;
+
 	while (1) {
 		k_sem_take(&lps22hh->intr_sem, K_FOREVER);
 		lps22hh_handle_interrupt(lps22hh->dev);
@@ -167,7 +170,7 @@ int lps22hh_init_interrupt(const struct device *dev)
 	int ret;
 
 	/* setup data ready gpio interrupt */
-	if (!device_is_ready(cfg->gpio_int.port)
+	if (!gpio_is_ready_dt(&cfg->gpio_int)
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(i3c)
 	    && (cfg->i3c.bus == NULL)
 #endif
@@ -189,7 +192,7 @@ int lps22hh_init_interrupt(const struct device *dev)
 
 	k_thread_create(&lps22hh->thread, lps22hh->thread_stack,
 		       CONFIG_LPS22HH_THREAD_STACK_SIZE,
-		       (k_thread_entry_t)lps22hh_thread, lps22hh,
+		       lps22hh_thread, lps22hh,
 		       NULL, NULL, K_PRIO_COOP(CONFIG_LPS22HH_THREAD_PRIORITY),
 		       0, K_NO_WAIT);
 #elif defined(CONFIG_LPS22HH_TRIGGER_GLOBAL_THREAD)

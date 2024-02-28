@@ -1,4 +1,4 @@
-# Copyright (c) 2021 Nordic Semiconductor
+# Copyright (c) 2023 Nordic Semiconductor
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -18,56 +18,32 @@ set(APP_DIR ${APP_DIR} CACHE PATH "Main Application Source Directory")
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake/modules)
 # List of Zephyr and sysbuild CMake modules we need for sysbuild.
 # Note: sysbuild_kconfig will internally load kconfig CMake module.
-set(zephyr_modules extensions sysbuild_extensions python west root zephyr_module boards shields sysbuild_kconfig)
+set(zephyr_modules extensions
+    sysbuild_extensions python west root zephyr_module boards shields
+    sysbuild_kconfig native_simulator_sb_extensions
+  )
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE} COMPONENTS ${zephyr_modules})
 
 project(sysbuild LANGUAGES)
 
-# Global list of images enabled in this multi image build system.
-set(IMAGES)
-
 get_filename_component(APP_DIR  ${APP_DIR} ABSOLUTE)
 get_filename_component(app_name ${APP_DIR} NAME)
-
-# Propagate bootloader and signing settings from this system to the MCUboot and
-# application image build systems.
-if(SB_CONFIG_BOOTLOADER_MCUBOOT)
-  set(${app_name}_CONFIG_BOOTLOADER_MCUBOOT y CACHE STRING
-      "MCUBOOT is enabled as bootloader" FORCE
-  )
-  set(${app_name}_CONFIG_MCUBOOT_SIGNATURE_KEY_FILE
-      \"${SB_CONFIG_BOOT_SIGNATURE_KEY_FILE}\" CACHE STRING
-      "Signature key file for signing" FORCE
-  )
-
-  # Set corresponding values in mcuboot
-  set(mcuboot_CONFIG_BOOT_SIGNATURE_TYPE_${SB_CONFIG_SIGNATURE_TYPE} y CACHE STRING
-      "MCUBOOT signature type" FORCE
-  )
-  set(mcuboot_CONFIG_BOOT_SIGNATURE_KEY_FILE
-      \"${SB_CONFIG_BOOT_SIGNATURE_KEY_FILE}\" CACHE STRING
-      "Signature key file for signing" FORCE
-  )
-else()
-  set(${app_name}_CONFIG_BOOTLOADER_MCUBOOT n CACHE STRING
-      "MCUBOOT is disabled as bootloader" FORCE
-  )
-endif()
-
-# This adds the primary application to the build.
-ExternalZephyrProject_Add(
-  APPLICATION ${app_name}
-  SOURCE_DIR ${APP_DIR}
-  MAIN_APP
-)
-list(APPEND IMAGES "${app_name}")
 set(DEFAULT_IMAGE "${app_name}")
 
-add_subdirectory(bootloader)
+# This is where all Zephyr applications are added to the multi-image build.
+sysbuild_add_subdirectory(images)
 
-# This allows for board and app specific images to be included.
-include(${BOARD_DIR}/sysbuild.cmake OPTIONAL)
-include(${APP_DIR}/sysbuild.cmake OPTIONAL)
+get_property(IMAGES GLOBAL PROPERTY sysbuild_images)
+sysbuild_module_call(PRE_CMAKE MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES})
+sysbuild_images_order(IMAGES_CONFIGURATION_ORDER CONFIGURE IMAGES ${IMAGES})
+foreach(image ${IMAGES_CONFIGURATION_ORDER})
+  sysbuild_module_call(PRE_IMAGE_CMAKE MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES} IMAGE ${image})
+  ExternalZephyrProject_Cmake(APPLICATION ${image})
+  sysbuild_module_call(POST_IMAGE_CMAKE MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES} IMAGE ${image})
+endforeach()
+sysbuild_module_call(POST_CMAKE MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES})
 
+sysbuild_module_call(PRE_DOMAINS MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES})
 include(cmake/domains.cmake)
+sysbuild_module_call(POST_DOMAINS MODULES ${SYSBUILD_MODULE_NAMES} IMAGES ${IMAGES})

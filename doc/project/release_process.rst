@@ -26,8 +26,8 @@ The Zephyr release model was loosely based on the Linux kernel model:
   changes such as bug fixes and documentation will be merged unless granted a
   special exemption by the Technical Steering Committee.
 
-  - Development phase: all changes are accepted (subject to approval from the
-    respective maintainers).
+  - Development phase: all changes are considered and merged, subject to
+    approval from the respective maintainers.
   - Stabilisation phase: the release manager creates a vN-rc1 tag and the tree
     enters the stabilization phase
   - CI sees the tag, builds and runs tests; Test teams analyse the report from the
@@ -45,6 +45,12 @@ The Zephyr release model was loosely based on the Linux kernel model:
 
     Release Cycle
 
+.. note::
+
+    The milestones for the current major version can be found on the
+    `Official GitHub Wiki <https://github.com/zephyrproject-rtos/zephyr/wiki/Release-Management>`_.
+    Information on previous releases can be found :ref:`here <zephyr_release_notes>`.
+
 Development Phase
 *****************
 
@@ -55,7 +61,7 @@ sufficiently stable (and which is accepted by the maintainers and the wide commu
 merged into the mainline tree.  The bulk of changes for a new development cycle
 (and all of the major changes) will be merged during this time.
 
-The development phase lasts for approximately two months.  At the end of this time,
+The development phase lasts for approximately three months.  At the end of this time,
 the release owner will declare that the development phase is over and releases the first
 of the release candidates.  For the codebase release which is destined to be
 3.1.0, for example, the release which happens at the end of the development phase
@@ -88,8 +94,8 @@ At that point, the whole process starts over again.
 Release Quality Criteria
 ************************
 
-The current backlog of prioritized bugs shall be used as a quality metric to
-gate the final release. The following counts shall be used:
+The current backlog of prioritized bugs shall also be used as a quality metric
+to gate the final release. The following counts shall be used:
 
 .. csv-table:: Bug Count Release Thresholds
    :header: "High", "Medium", "Low"
@@ -103,6 +109,10 @@ gate the final release. The following counts shall be used:
    The "low" bug count target of <50 will be a phased approach starting with 150
    for release 2.4.0, 100 for release 2.5.0, and 50 for release 2.6.0
 
+The final release must not contain any static analysis high-critical issues
+that can potentially compromise the functionality, security, or reliability of
+our software.  High-critical issues represent vulnerabilities that, if left
+unresolved, could have severe consequences.
 
 
 Release Milestones
@@ -178,6 +188,8 @@ The following syntax should be used for releases and tags in Git:
     :width: 80%
 
     Zephyr Code and Releases
+
+.. _release_process_lts:
 
 Long Term Support (LTS)
 =======================
@@ -261,8 +273,11 @@ components provided by the project:
 
 - Compliance with published coding guidelines, style guides and naming
   conventions and documentation of deviations.
-- Regular static analysis on the complete tree using available commercial and
-  open-source tools and documentation of deviations and false positives.
+- Static analysis reports
+
+  - Regular static analysis on the complete tree using available commercial and
+    open-source tools, and documentation of deviations and false positives.
+
 - Documented components and APIS
 - Requirements Catalog
 - Verification Plans
@@ -407,26 +422,3 @@ steps:
 
         #. Send an email to the mailing lists (``announce`` and ``devel``) with a link
            to the release
-
-Listing all closed GitHub issues
-=================================
-
-The release notes for a final release contain the list of GitHub issues that
-have been closed during the development process of that release.
-
-In order to obtain the list of issues closed during the release development
-cycle you can do the following:
-
-#. Look for the last release before the current one and find the day it was
-   tagged::
-
-    $ git show -s --format=%ci v1.10.0
-    tag v1.10.0
-    Tagger: Kumar Gala <kumar.gala@linaro.org>
-
-    Zephyr 1.10.0
-    2017-12-08 13:32:22 -0600
-
-
-#. Use available release tools to list all the issues that have been closed
-   between that date and the day of the release.

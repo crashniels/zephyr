@@ -136,7 +136,7 @@ class Reporting:
                     name, classname, status, ts_status, reason, tc_duration, runnable,
                     (fails, passes, errors, skips), log, True)
 
-            total = (errors + passes + fails + skips)
+            total = errors + passes + fails + skips
 
             eleTestsuite.attrib['time'] = f"{duration}"
             eleTestsuite.attrib['failures'] = f"{fails}"
@@ -220,7 +220,7 @@ class Reporting:
                         name, classname, ts_status, ts_status, reason, duration, runnable,
                         (fails, passes, errors, skips), log, False)
 
-            total = (errors + passes + fails + skips)
+            total = errors + passes + fails + skips
 
             eleTestsuite.attrib['time'] = f"{duration}"
             eleTestsuite.attrib['failures'] = f"{fails}"
@@ -232,28 +232,36 @@ class Reporting:
         with open(filename, 'wb') as report:
             report.write(result)
 
-    def json_report(self, filename, version="NA"):
+    def json_report(self, filename, version="NA", platform=None):
         logger.info(f"Writing JSON report {filename}")
         report = {}
         report["environment"] = {"os": os.name,
                                  "zephyr_version": version,
-                                 "toolchain": self.env.toolchain
+                                 "toolchain": self.env.toolchain,
+                                 "commit_date": self.env.commit_date,
+                                 "run_date": self.env.run_date
                                  }
         suites = []
 
         for instance in self.instances.values():
+            if platform and platform != instance.platform.name:
+                continue
             suite = {}
             handler_log = os.path.join(instance.build_dir, "handler.log")
+            pytest_log = os.path.join(instance.build_dir, "twister_harness.log")
             build_log = os.path.join(instance.build_dir, "build.log")
             device_log = os.path.join(instance.build_dir, "device.log")
 
             handler_time = instance.metrics.get('handler_time', 0)
-            ram_size = instance.metrics.get ("ram_size", 0)
-            rom_size  = instance.metrics.get("rom_size",0)
+            used_ram = instance.metrics.get ("used_ram", 0)
+            used_rom  = instance.metrics.get("used_rom",0)
+            available_ram = instance.metrics.get("available_ram", 0)
+            available_rom = instance.metrics.get("available_rom", 0)
             suite = {
                 "name": instance.testsuite.name,
                 "arch": instance.platform.arch,
                 "platform": instance.platform.name,
+                "path": instance.testsuite.source_dir_rel
             }
             if instance.run_id:
                 suite['run_id'] = instance.run_id
@@ -262,16 +270,26 @@ class Reporting:
             if instance.status != 'filtered':
                 suite["runnable"] = instance.run
 
-            if ram_size:
-                suite["ram_size"] = ram_size
-            if rom_size:
-                suite["rom_size"] = rom_size
+            if used_ram:
+                suite["used_ram"] = used_ram
+            if used_rom:
+                suite["used_rom"] = used_rom
 
+            suite['retries'] = instance.retries
+
+            if instance.dut:
+                suite["dut"] = instance.dut
+            if available_ram:
+                suite["available_ram"] = available_ram
+            if available_rom:
+                suite["available_rom"] = available_rom
             if instance.status in ["error", "failed"]:
                 suite['status'] = instance.status
                 suite["reason"] = instance.reason
                 # FIXME
-                if os.path.exists(handler_log):
+                if os.path.exists(pytest_log):
+                    suite["log"] = self.process_log(pytest_log)
+                elif os.path.exists(handler_log):
                     suite["log"] = self.process_log(handler_log)
                 elif os.path.exists(device_log):
                     suite["log"] = self.process_log(device_log)
@@ -288,6 +306,7 @@ class Reporting:
 
             if instance.status is not None:
                 suite["execution_time"] =  f"{float(handler_time):.2f}"
+            suite["build_time"] =  f"{float(instance.build_time):.2f}"
 
             testcases = []
 
@@ -328,6 +347,10 @@ class Reporting:
                 testcases.append(testcase)
 
             suite['testcases'] = testcases
+
+            if instance.recording is not None:
+                suite['recording'] = instance.recording
+
             suites.append(suite)
 
         report["testsuites"] = suites
@@ -337,8 +360,8 @@ class Reporting:
 
     def compare_metrics(self, filename):
         # name, datatype, lower results better
-        interesting_metrics = [("ram_size", int, True),
-                               ("rom_size", int, True)]
+        interesting_metrics = [("used_ram", int, True),
+                               ("used_rom", int, True)]
 
         if not os.path.exists(filename):
             logger.error("Cannot compare metrics, %s not found" % filename)
@@ -404,6 +427,35 @@ class Reporting:
             logger.warning("Deltas based on metrics from last %s" %
                            ("release" if not last_metrics else "run"))
 
+    def synopsis(self):
+        cnt = 0
+        example_instance = None
+        detailed_test_id = self.env.options.detailed_test_id
+        for instance in self.instances.values():
+            if instance.status not in ["passed", "filtered", "skipped"]:
+                cnt = cnt + 1
+                if cnt == 1:
+                    logger.info("-+" * 40)
+                    logger.info("The following issues were found (showing the top 10 items):")
+
+                logger.info(f"{cnt}) {instance.testsuite.name} on {instance.platform.name} {instance.status} ({instance.reason})")
+                example_instance = instance
+            if cnt == 10:
+                break
+
+        if cnt and example_instance:
+            logger.info("")
+            logger.info("To rerun the tests, call twister using the following commandline:")
+            extra_parameters = '' if detailed_test_id else ' --no-detailed-test-id'
+            logger.info(f"west twister -p <PLATFORM> -s <TEST ID>{extra_parameters}, for example:")
+            logger.info("")
+            logger.info(f"west twister -p {example_instance.platform.name} -s {example_instance.testsuite.name}"
+                        f"{extra_parameters}")
+            logger.info(f"or with west:")
+            logger.info(f"west build -p -b {example_instance.platform.name} "
+                        f"{example_instance.testsuite.source_dir_rel} -T {example_instance.testsuite.id}")
+            logger.info("-+" * 40)
+
     def summary(self, results, unrecognized_sections, duration):
         failed = 0
         run = 0
@@ -427,14 +479,17 @@ class Reporting:
             pass_rate = 0
 
         logger.info(
-            "{}{} of {}{} test configurations passed ({:.2%}), {}{}{} failed, {} skipped with {}{}{} warnings in {:.2f} seconds".format(
+            "{}{} of {}{} test configurations passed ({:.2%}), {}{}{} failed, {}{}{} errored, {} skipped with {}{}{} warnings in {:.2f} seconds".format(
                 Fore.RED if failed else Fore.GREEN,
                 results.passed,
                 results.total,
                 Fore.RESET,
                 pass_rate,
                 Fore.RED if results.failed else Fore.RESET,
-                results.failed + results.error,
+                results.failed,
+                Fore.RESET,
+                Fore.RED if results.error else Fore.RESET,
+                results.error,
                 Fore.RESET,
                 results.skipped_configs,
                 Fore.YELLOW if self.plan.warnings else Fore.RESET,
@@ -494,6 +549,9 @@ class Reporting:
         for platform in platforms:
             if suffix:
                 filename = os.path.join(outdir,"{}_{}.xml".format(platform, suffix))
+                json_platform_file = os.path.join(outdir,"{}_{}.json".format(platform, suffix))
             else:
                 filename = os.path.join(outdir,"{}.xml".format(platform))
+                json_platform_file = os.path.join(outdir,"{}.json".format(platform))
             self.xunit_report(json_file, filename, platform, full_report=True)
+            self.json_report(json_platform_file, version=self.env.version, platform=platform)

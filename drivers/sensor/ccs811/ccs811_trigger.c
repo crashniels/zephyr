@@ -77,7 +77,7 @@ static void process_irq(const struct device *dev)
 	struct ccs811_data *data = dev->data;
 
 	if (data->handler != NULL) {
-		data->handler(dev, &data->trigger);
+		data->handler(dev, data->trigger);
 	}
 
 	if (data->handler != NULL) {
@@ -98,9 +98,12 @@ static void gpio_callback(const struct device *dev,
 }
 
 #ifdef CONFIG_CCS811_TRIGGER_OWN_THREAD
-static void irq_thread(struct ccs811_data *dev)
+static void irq_thread(void *p1, void *p2, void *p3)
 {
-	struct ccs811_data *drv_data = dev->data;
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct ccs811_data *drv_data = p1;
 
 	while (1) {
 		k_sem_take(&drv_data->gpio_sem, K_FOREVER);
@@ -159,7 +162,7 @@ int ccs811_trigger_set(const struct device *dev,
 	}
 
 	if (rc == 0) {
-		drv_data->trigger = *trig;
+		drv_data->trigger = trig;
 		setup_irq(dev, true);
 
 		if (gpio_pin_get_dt(&config->irq_gpio) > 0) {
@@ -194,7 +197,7 @@ int ccs811_init_interrupt(const struct device *dev)
 
 	k_thread_create(&drv_data->thread, drv_data->thread_stack,
 			CONFIG_CCS811_THREAD_STACK_SIZE,
-			(k_thread_entry_t)irq_thread, dev,
+			irq_thread, drv_data,
 			NULL, NULL, K_PRIO_COOP(CONFIG_CCS811_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 #elif defined(CONFIG_CCS811_TRIGGER_GLOBAL_THREAD)

@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 NXP
+ * Copyright 2022-2023 NXP
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,28 +26,36 @@ extern "C" {
  */
 enum sd_opcode {
 	SD_GO_IDLE_STATE = 0,
+	MMC_SEND_OP_COND = 1,
 	SD_ALL_SEND_CID = 2,
 	SD_SEND_RELATIVE_ADDR = 3,
+	MMC_SEND_RELATIVE_ADDR = 3,
 	SDIO_SEND_OP_COND = 5, /* SDIO cards only */
 	SD_SWITCH = 6,
 	SD_SELECT_CARD = 7,
 	SD_SEND_IF_COND = 8,
+	MMC_SEND_EXT_CSD = 8,
 	SD_SEND_CSD = 9,
 	SD_SEND_CID = 10,
 	SD_VOL_SWITCH = 11,
 	SD_STOP_TRANSMISSION = 12,
 	SD_SEND_STATUS = 13,
+	MMC_CHECK_BUS_TEST = 14,
 	SD_GO_INACTIVE_STATE = 15,
 	SD_SET_BLOCK_SIZE = 16,
 	SD_READ_SINGLE_BLOCK = 17,
 	SD_READ_MULTIPLE_BLOCK = 18,
 	SD_SEND_TUNING_BLOCK = 19,
+	MMC_SEND_BUS_TEST = 19,
+	MMC_SEND_TUNING_BLOCK = 21,
 	SD_SET_BLOCK_COUNT = 23,
 	SD_WRITE_SINGLE_BLOCK = 24,
 	SD_WRITE_MULTIPLE_BLOCK = 25,
 	SD_ERASE_BLOCK_START = 32,
 	SD_ERASE_BLOCK_END = 33,
 	SD_ERASE_BLOCK_OPERATION = 38,
+	SDIO_RW_DIRECT = 52,
+	SDIO_RW_EXTENDED = 53,
 	SD_APP_CMD = 55,
 	SD_SPI_READ_OCR = 58, /* SPI mode only */
 	SD_SPI_CRC_ON_OFF = 59, /* SPI mode only */
@@ -238,6 +246,7 @@ enum sd_support_flag {
 	SD_3000MV_FLAG = BIT(6),
 	SD_CMD23_FLAG = BIT(7),
 	SD_SPEED_CLASS_CONTROL_FLAG = BIT(8),
+	SD_MEM_PRESENT_FLAG = BIT(9),
 };
 
 
@@ -278,9 +287,23 @@ enum sd_ocr_flag {
 	/*!< VDD 3.4-3.5 */
 };
 
-#define SDIO_OCR_IO_NUMBER_SHIFT (28U)
+/**
+ * @brief MMC OCR bit flags
+ *
+ * bit flags present in MMC OCR response. Used to determine status and
+ * supported functions of MMC card.
+ */
+enum mmc_ocr_flag {
+	MMC_OCR_VDD170_195FLAG = BIT(7),
+	MMC_OCR_VDD20_26FLAG = 0x7F << 8,
+	MMC_OCR_VDD27_36FLAG = 0x1FF << 15,
+	MMC_OCR_SECTOR_MODE = BIT(30),
+	MMC_OCR_PWR_BUSY_FLAG = BIT(31)
+};
+
+#define SDIO_OCR_IO_NUMBER_SHIFT 28
 /* Lower 24 bits hold SDIO I/O OCR */
-#define SDIO_IO_OCR_MASK (0xFFFFFFU)
+#define SDIO_IO_OCR_MASK 0xFFFFFF
 
 /**
  * @brief SDIO OCR bit flags
@@ -397,7 +420,7 @@ enum sdhc_clock_speed {
 	MMC_CLOCK_52MHZ = 52000000U,
 	MMC_CLOCK_DDR52 = 52000000U,
 	MMC_CLOCK_HS200 = 200000000U,
-	MMC_CLOCK_HS400 = 400000000U,
+	MMC_CLOCK_HS400 = 200000000U, /* Same clock freq as HS200, just DDR */
 };
 
 /**
@@ -471,7 +494,7 @@ struct sd_switch_caps {
 };
 
 
-#define SD_PRODUCT_NAME_BYTES (5U)
+#define SD_PRODUCT_NAME_BYTES 5
 
 /**
  * @brief SD card identification register
@@ -525,7 +548,6 @@ struct sd_csd {
 	/*!< Maximum write current at VDD max [52:50] */
 	uint8_t dev_size_mul;
 	/*!< Device size multiplier [49:47] */
-
 	uint8_t erase_size;
 	/*!< Erase sector size [45:39] */
 	uint8_t write_prtect_size;
@@ -536,6 +558,120 @@ struct sd_csd {
 	/*!< Maximum write data block length [25:22] */
 	uint8_t file_fmt;
 	/*!< File format [11:10] */
+};
+
+/**
+ * @brief MMC Maximum Frequency
+ *
+ * Max freq in MMC csd
+ */
+enum mmc_csd_freq {
+	MMC_MAXFREQ_100KHZ = 0U << 0U,
+	MMC_MAXFREQ_1MHZ = 1U << 0U,
+	MMC_MAXFREQ_10MHZ = 2U << 0U,
+	MMC_MAXFREQ_100MHZ = 3U << 0U,
+	MMC_MAXFREQ_MULT_10 = 1U << 3U,
+	MMC_MAXFREQ_MULT_12 = 2U << 3U,
+	MMC_MAXFREQ_MULT_13 = 3U << 3U,
+	MMC_MAXFREQ_MULT_15 = 4U << 3U,
+	MMC_MAXFREQ_MULT_20 = 5U << 3U,
+	MMC_MAXFREQ_MULT_26 = 6U << 3U,
+	MMC_MAXFREQ_MULT_30 = 7U << 3U,
+	MMC_MAXFREQ_MULT_35 = 8U << 3U,
+	MMC_MAXFREQ_MULT_40 = 9U << 3U,
+	MMC_MAXFREQ_MULT_45 = 0xAU << 3U,
+	MMC_MAXFREQ_MULT_52 = 0xBU << 3U,
+	MMC_MAXFREQ_MULT_55 = 0xCU << 3U,
+	MMC_MAXFREQ_MULT_60 = 0xDU << 3U,
+	MMC_MAXFREQ_MULT_70 = 0xEU << 3U,
+	MMC_MAXFREQ_MULT_80 = 0xFU << 3u
+};
+
+/**
+ * @brief MMC Timing Modes
+ *
+ * MMC Timing Mode, encoded in EXT_CSD
+ */
+enum mmc_timing_mode {
+	MMC_LEGACY_TIMING = 0U,
+	MMC_HS_TIMING = 1U,
+	MMC_HS200_TIMING = 2U,
+	MMC_HS400_TIMING = 3U
+};
+
+/**
+ * @brief MMC Driver Strengths
+ *
+ * Encoded in EXT_CSD
+ */
+enum mmc_driver_strengths {
+	mmc_driv_type0 = 0U,
+	mmc_driv_type1 = 1U,
+	mmc_driv_type2 = 2U,
+	mmc_driv_type3 = 3U,
+	mmc_driv_type4 = 4U
+};
+
+
+/**
+ * @brief MMC Device Type
+ *
+ * Encoded in EXT_CSD
+ */
+struct mmc_device_type {
+	bool MMC_HS400_DDR_1200MV;
+	bool MMC_HS400_DDR_1800MV;
+	bool MMC_HS200_SDR_1200MV;
+	bool MMC_HS200_SDR_1800MV;
+	bool MMC_HS_DDR_1200MV;
+	bool MMC_HS_DDR_1800MV;
+	bool MMC_HS_52_DV;
+	bool MMC_HS_26_DV;
+};
+
+/**
+ * @brief CSD Revision
+ *
+ * Value of CSD rev in EXT_CSD
+ */
+enum mmc_ext_csd_rev {
+	MMC_5_1 = 8U,
+	MMC_5_0 = 7U,
+	MMC_4_5 = 6U,
+	MMC_4_4 = 5U,
+	MMC_4_3 = 3U,
+	MMC_4_2 = 2U,
+	MMC_4_1 = 1U,
+	MMC_4_0 = 0U
+};
+
+/**
+ * @brief MMC extended card specific data register
+ *
+ * Extended card specific data register.
+ * Contains additional additional data about MMC card.
+ */
+struct mmc_ext_csd {
+	uint32_t sec_count;
+	/*!< Sector Count [215:212] >*/
+	uint8_t bus_width;
+	/*!< Bus Width Mode [183] >*/
+	enum mmc_timing_mode hs_timing;
+	/*!< High Speed Timing Mode [185] >*/
+	struct mmc_device_type device_type;
+	/*!< Device Type [196] >*/
+	enum mmc_ext_csd_rev rev;
+	/*!< Extended CSD Revision [192] >*/
+	uint8_t power_class;
+	/*!< Selected power class [187]>*/
+	uint8_t mmc_driver_strengths;
+	/*!< Driver strengths [197] >*/
+	uint8_t pwr_class_200MHZ_VCCQ195;
+	/*!< Power class information for HS200 at VCC!=1.95V [237] >*/
+	uint8_t pwr_class_HS400;
+	/*!< Power class information for HS400 [253] >*/
+	uint32_t cache_size;
+	/*!< Size of eMMC cache [252:249]>*/
 };
 
 /**
@@ -621,8 +757,158 @@ enum sd_spec_version {
 };
 
 
-#define SDMMC_DEFAULT_BLOCK_SIZE (512U)
+#define SDMMC_DEFAULT_BLOCK_SIZE 512
+#define MMC_EXT_CSD_BYTES 512
+/**
+ * @brief SDIO function number
+ *
+ * SDIO function number used to select function when performing I/O on SDIO card
+ */
+enum sdio_func_num {
+	SDIO_FUNC_NUM_0 = 0,
+	SDIO_FUNC_NUM_1 = 1,
+	SDIO_FUNC_NUM_2 = 2,
+	SDIO_FUNC_NUM_3 = 3,
+	SDIO_FUNC_NUM_4 = 4,
+	SDIO_FUNC_NUM_5 = 5,
+	SDIO_FUNC_NUM_6 = 6,
+	SDIO_FUNC_NUM_7 = 7,
+	SDIO_FUNC_MEMORY = 8,
+};
 
+/**
+ * @brief SDIO I/O direction
+ *
+ * SDIO I/O direction (read or write)
+ */
+enum sdio_io_dir {
+	SDIO_IO_READ = 0,
+	SDIO_IO_WRITE = 1,
+};
+
+#define SDIO_CMD_ARG_RW_SHIFT 31		/*!< read/write flag shift */
+#define SDIO_CMD_ARG_FUNC_NUM_SHIFT 28	/*!< function number shift */
+#define SDIO_DIRECT_CMD_ARG_RAW_SHIFT 27	/*!< direct raw flag shift */
+#define SDIO_CMD_ARG_REG_ADDR_SHIFT 9	/*!< direct reg addr shift */
+#define SDIO_CMD_ARG_REG_ADDR_MASK 0x1FFFF	/*!< direct reg addr mask */
+#define SDIO_DIRECT_CMD_DATA_MASK 0xFF	/*!< data mask */
+
+#define SDIO_EXTEND_CMD_ARG_BLK_SHIFT 27	/*!< extended write block mode */
+#define SDIO_EXTEND_CMD_ARG_OP_CODE_SHIFT 26	/*!< op code (increment address) */
+
+/**
+ * @brief Card common control register definitions
+ *
+ * Card common control registers, present on all SDIO cards
+ */
+#define SDIO_CCCR_CCCR 0x00 /*!< SDIO CCCR revision register */
+#define SDIO_CCCR_CCCR_REV_MASK 0x0F
+#define SDIO_CCCR_CCCR_REV_SHIFT 0x0
+#define SDIO_CCCR_CCCR_REV_1_00 0x0 /*!< CCCR/FBR Version 1.00 */
+#define SDIO_CCCR_CCCR_REV_1_10 0x1 /*!< CCCR/FBR Version 1.10 */
+#define SDIO_CCCR_CCCR_REV_2_00 0x2 /*!< CCCR/FBR Version 2.00 */
+#define SDIO_CCCR_CCCR_REV_3_00 0x3 /*!< CCCR/FBR Version 3.00 */
+
+#define SDIO_CCCR_SD 0x01 /*!< SD spec version  register */
+#define SDIO_CCCR_SD_SPEC_MASK 0x0F
+#define SDIO_CCCR_SD_SPEC_SHIFT 0x0
+
+#define SDIO_CCCR_IO_EN 0x02 /*!< SDIO IO Enable register */
+
+#define SDIO_CCCR_IO_RD 0x03 /*!< SDIO IO Ready register */
+
+#define SDIO_CCCR_INT_EN 0x04 /*!< SDIO Interrupt enable register */
+
+#define SDIO_CCCR_INT_P 0x05 /*!< SDIO Interrupt pending register */
+
+#define SDIO_CCCR_ABORT 0x06 /*!< SDIO IO abort register */
+
+#define SDIO_CCCR_BUS_IF 0x07 /*!< SDIO bus interface control register */
+#define SDIO_CCCR_BUS_IF_WIDTH_MASK 0x3 /*!< SDIO bus width setting mask */
+#define SDIO_CCCR_BUS_IF_WIDTH_1_BIT 0x00 /*!< 1 bit SDIO bus setting */
+#define SDIO_CCCR_BUS_IF_WIDTH_4_BIT 0x02 /*!< 4 bit SDIO bus setting */
+#define SDIO_CCCR_BUS_IF_WIDTH_8_BIT 0x03 /*!< 8 bit SDIO bus setting */
+
+#define SDIO_CCCR_CAPS 0x08 /*!< SDIO card capabilities */
+#define SDIO_CCCR_CAPS_SDC BIT(0) /*!< support CMD52 while data transfer */
+#define SDIO_CCCR_CAPS_SMB BIT(1) /*!< support multiple block transfer */
+#define SDIO_CCCR_CAPS_SRW BIT(2) /*!< support read wait control */
+#define SDIO_CCCR_CAPS_SBS BIT(3) /*!< support bus control */
+#define SDIO_CCCR_CAPS_S4MI BIT(4) /*!< support block gap interrupt */
+#define SDIO_CCCR_CAPS_E4MI BIT(5) /*!< enable block gap interrupt */
+#define SDIO_CCCR_CAPS_LSC BIT(6) /*!< low speed card */
+#define SDIO_CCCR_CAPS_BLS BIT(7) /*!< low speed card with 4 bit support */
+
+#define SDIO_CCCR_CIS 0x09 /*!< SDIO CIS tuples pointer */
+
+#define SDIO_CCCR_SPEED	0x13 /*!< SDIO bus speed select */
+#define SDIO_CCCR_SPEED_SHS BIT(0) /*!< high speed support */
+#define SDIO_CCCR_SPEED_MASK 0xE /*!< bus speed select mask*/
+#define SDIO_CCCR_SPEED_SHIFT 0x1 /*!< bus speed select shift */
+#define SDIO_CCCR_SPEED_SDR12 0x0 /*!< select SDR12 */
+#define SDIO_CCCR_SPEED_HS 0x1 /*!< select High speed mode */
+#define SDIO_CCCR_SPEED_SDR25 0x1 /*!< select SDR25 */
+#define SDIO_CCCR_SPEED_SDR50 0x2 /*!< select SDR50 */
+#define SDIO_CCCR_SPEED_SDR104 0x3 /*!< select SDR104 */
+#define SDIO_CCCR_SPEED_DDR50 0x4 /*!< select DDR50 */
+
+#define SDIO_CCCR_UHS 0x14 /*!< SDIO UHS support */
+#define SDIO_CCCR_UHS_SDR50 BIT(0) /*!< SDR50 support */
+#define SDIO_CCCR_UHS_SDR104 BIT(1) /*!< SDR104 support */
+#define SDIO_CCCR_UHS_DDR50 BIT(2) /*!< DDR50 support */
+
+#define SDIO_CCCR_DRIVE_STRENGTH 0x15 /*!< SDIO drive strength */
+#define SDIO_CCCR_DRIVE_STRENGTH_A BIT(0) /*!< drive type A */
+#define SDIO_CCCR_DRIVE_STRENGTH_C BIT(1) /*!< drive type C */
+#define SDIO_CCCR_DRIVE_STRENGTH_D BIT(2) /*!< drive type D */
+
+#define SDIO_FBR_BASE(n) ((n) * 0x100) /*!< Get function base register addr */
+
+#define SDIO_FBR_CIS 0x09 /*!< SDIO function base register CIS pointer */
+#define SDIO_FBR_CSA 0x0C /*!< SDIO function base register CSA pointer */
+#define SDIO_FBR_BLK_SIZE 0x10 /*!< SDIO function base register block size */
+
+
+#define SDIO_MAX_IO_NUMS 7 /*!< Maximum number of I/O functions for SDIO */
+
+#define SDIO_TPL_CODE_NULL 0x00 /*!< NULL CIS tuple code */
+#define SDIO_TPL_CODE_MANIFID 0x20 /*!< manufacturer ID CIS tuple code */
+#define SDIO_TPL_CODE_FUNCID 0x21 /*!< function ID CIS tuple code */
+#define SDIO_TPL_CODE_FUNCE 0x22 /*!< function extension CIS tuple code */
+#define SDIO_TPL_CODE_END 0xFF /*!< End CIS tuple code */
+
+/**
+ * @brief Card common control register flags
+ *
+ * flags to indicate capabilities supported by an SDIO card, read from the CCCR
+ * registers
+ */
+enum sdio_cccr_flags {
+	SDIO_SUPPORT_HS = BIT(0),
+	SDIO_SUPPORT_SDR50 = BIT(1),
+	SDIO_SUPPORT_SDR104 = BIT(2),
+	SDIO_SUPPORT_DDR50 = BIT(3),
+	SDIO_SUPPORT_4BIT_LS_BUS = BIT(4),
+	SDIO_SUPPORT_MULTIBLOCK = BIT(5),
+};
+
+/**
+ * @brief SDIO common CIS tuple properties
+ *
+ * CIS tuple properties. Note that additional properties exist for
+ * functions 1-7, but we do not read this data as the stack does not utilize it.
+ */
+struct sdio_cis {
+	/* Manufacturer ID string tuple */
+	uint16_t manf_id; /*!< manufacturer ID */
+	uint16_t manf_code; /*!< manufacturer code */
+	/* Function identification tuple */
+	uint8_t func_id; /*!< sdio device class function id */
+	/* Function extension table */
+	uint16_t max_blk_size; /*!< Max transfer block size */
+	uint8_t max_speed; /*!< Max transfer speed */
+	uint16_t rdy_timeout; /*!< I/O ready timeout */
+};
 
 #ifdef __cplusplus
 }

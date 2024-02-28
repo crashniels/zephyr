@@ -37,27 +37,27 @@ ZTEST(stm32_sysclck_config, test_sysclk_src)
 
 #if STM32_SYSCLK_SRC_PLL
 	zassert_equal(RCC_SYSCLKSOURCE_STATUS_PLLCLK, sys_clk_src,
-			"Expected sysclk src: PLL. Actual sysclk src: %d",
-			sys_clk_src);
+			"Expected sysclk src: PLL (0x%x). Actual: 0x%x",
+			RCC_SYSCLKSOURCE_STATUS_PLLCLK, sys_clk_src);
 #elif STM32_SYSCLK_SRC_HSE
 	zassert_equal(RCC_SYSCLKSOURCE_STATUS_HSE, sys_clk_src,
-			"Expected sysclk src: HSE. Actual sysclk src: %d",
-			sys_clk_src);
+			"Expected sysclk src: HSE (0x%x). Actual: 0x%x",
+			RCC_SYSCLKSOURCE_STATUS_HSE, sys_clk_src);
 #elif STM32_SYSCLK_SRC_HSI
 	zassert_equal(RCC_SYSCLKSOURCE_STATUS_HSI, sys_clk_src,
-			"Expected sysclk src: HSI. Actual sysclk src: %d",
-			sys_clk_src);
+			"Expected sysclk src: HSI (0x%x). Actual: 0x%x",
+			RCC_SYSCLKSOURCE_STATUS_HSI, sys_clk_src);
 #elif STM32_SYSCLK_SRC_MSI
 	zassert_equal(RCC_SYSCLKSOURCE_STATUS_MSI, sys_clk_src,
-			"Expected sysclk src: MSI. Actual sysclk src: %d",
-			sys_clk_src);
+			"Expected sysclk src: MSI (0x%x). Actual: 0x%x",
+			RCC_SYSCLKSOURCE_STATUS_MSI, sys_clk_src);
 #else
 	/* Case not expected */
 	zassert_true((STM32_SYSCLK_SRC_PLL ||
 		      STM32_SYSCLK_SRC_HSE ||
 		      STM32_SYSCLK_SRC_HSI ||
 		      STM32_SYSCLK_SRC_MSI),
-		      "Not expected. sys_clk_src: %d\n", sys_clk_src);
+		      "Not expected. sys_clk_src: 0x%x\n", sys_clk_src);
 #endif
 
 }
@@ -105,4 +105,17 @@ ZTEST(stm32_sysclck_config, test_pll_src)
 #endif
 
 }
+
+#if STM32_HSE_ENABLED
+ZTEST(stm32_sysclck_config, test_hse_css)
+{
+	/* there is no function to read CSS status, so read directly from the register */
+#if STM32_HSE_CSS
+	zassert_true(READ_BIT(RCC->CR, RCC_CR_CSSON), "HSE CSS is not enabled");
+#else
+	zassert_false(READ_BIT(RCC->CR, RCC_CR_CSSON), "HSE CSS unexpectedly enabled");
+#endif /* STM32_HSE_CSS */
+
+}
+#endif /* STM32_HSE_ENABLED */
 ZTEST_SUITE(stm32_sysclck_config, NULL, NULL, NULL, NULL, NULL);

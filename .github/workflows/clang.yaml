@@ -8,19 +8,19 @@ concurrency:
 
 jobs:
   clang-build:
-    runs-on: zephyr_runner
+    if: github.repository_owner == 'zephyrproject-rtos'
+    runs-on: zephyr-runner-linux-x64-4xlarge
     container:
-      image: ghcr.io/zephyrproject-rtos/ci:v0.24.5
+      image: ghcr.io/zephyrproject-rtos/ci:v0.26.7
       options: '--entrypoint /bin/bash'
       volumes:
-        - /home/runners/zephyrproject:/github/cache/zephyrproject
+        - /repo-cache/zephyrproject:/github/cache/zephyrproject
     strategy:
       fail-fast: false
       matrix:
-        platform: ["native_posix"]
+        platform: ["native_sim"]
     env:
-      ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.15.1
-      LLVM_TOOLCHAIN_PATH: /usr/lib/llvm-15
+      LLVM_TOOLCHAIN_PATH: /usr/lib/llvm-16
       COMMIT_RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
       BASE_REF: ${{ github.base_ref }}
     outputs:
@@ -34,12 +34,14 @@ jobs:
           #        GitHub comes up with a fundamental fix for this problem.
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
 
-      - name: Cleanup
+      - name: Clone cached Zephyr repository
+        continue-on-error: true
         run: |
-          # hotfix, until we have a better way to deal with existing data
-          rm -rf zephyr zephyr-testing
+          git clone --shared /github/cache/zephyrproject/zephyr .
+          git remote set-url origin ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}
+
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -55,12 +57,15 @@ jobs:
           git log  --pretty=oneline | head -n 10
           west init -l . || true
           west config --global update.narrow true
+          west config manifest.group-filter -- +ci,+optional
           # In some cases modules are left in a state where they can't be
           # updated (i.e. when we cancel a job and the builder is killed),
           # So first retry to update, if that does not work, remove all modules
           # and start over. (Workaround until we implement more robust module
           # west caching).
           west update --path-cache /github/cache/zephyrproject 2>&1 1> west.log || west update --path-cache /github/cache/zephyrproject 2>&1 1> west2.log || ( rm -rf ../modules ../bootloader ../tools && west update --path-cache /github/cache/zephyrproject)
+
+          echo "ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-$( cat SDK_VERSION )" >> $GITHUB_ENV
 
       - name: Check Environment
         run: |
@@ -77,20 +82,22 @@ jobs:
           string(REPLACE "/" "_" repo ${{github.repository}})
           string(REPLACE "-" "_" repo2 ${repo})
           file(APPEND $ENV{GITHUB_OUTPUT} "repo=${repo2}\n")
+
       - name: use cache
         id: cache-ccache
-        uses: zephyrproject-rtos/action-s3-cache@v1
+        uses: zephyrproject-rtos/action-s3-cache@v1.2.0
         with:
           key: ${{ steps.ccache_cache_timestamp.outputs.repo }}-${{ github.ref_name }}-clang-${{ matrix.platform }}-ccache
-          path: /github/home/.ccache
+          path: /github/home/.cache/ccache
           aws-s3-bucket: ccache.zephyrproject.org
-          aws-access-key-id: ${{ secrets.CCACHE_S3_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.CCACHE_S3_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ vars.AWS_CCACHE_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_CCACHE_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
       - name: ccache stats initial
         run: |
-          test -d github/home/.ccache && rm -rf /github/home/.ccache && mv github/home/.ccache /github/home/.ccache
+          mkdir -p /github/home/.cache
+          test -d github/home/.cache/ccache && rm -rf /github/home/.cache/ccache && mv github/home/.cache/ccache /github/home/.cache/ccache
           ccache -M 10G -s
 
       - name: Run Tests with Twister
@@ -115,10 +122,11 @@ jobs:
       - name: ccache stats post
         run: |
           ccache -s
+          ccache -p
 
       - name: Upload Unit Test Results
         if: always() && steps.twister.outputs.report_needed != 0
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Unit Test Results (Subset ${{ matrix.platform }})
           path: twister-out/twister.xml
@@ -126,11 +134,11 @@ jobs:
   clang-build-results:
     name: "Publish Unit Tests Results"
     needs: clang-build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     if: (success() || failure() ) && needs.clang-build.outputs.report_needed != 0
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Merge Test Results
@@ -141,7 +149,7 @@ jobs:
 
       - name: Upload Unit Test Results in HTML
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: HTML Unit Test Results
           if-no-files-found: ignore
@@ -149,10 +157,9 @@ jobs:
             junit-clang.html
 
       - name: Publish Unit Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v1
+        uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           check_name: Unit Test Results
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           files: "**/twister.xml"
           comment_mode: off

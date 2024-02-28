@@ -13,8 +13,12 @@ choice CODE_LOCATION
 	default CODE_FLEXSPI
 endchoice
 
-config DISK_DRIVER_SDMMC
-	default y if DISK_DRIVERS
+config DEVICE_CONFIGURATION_DATA
+	default y
+
+config NXP_IMX_EXTERNAL_SDRAM
+	default y
+
 if FLASH
 
 config FLASH_MCUX_FLEXSPI_HYPERFLASH
@@ -27,35 +31,36 @@ config FLASH_MCUX_FLEXSPI_NOR
 
 endif #FLASH
 
-config KSCAN
+config INPUT
 	default y if LVGL
 
-if KSCAN
+if INPUT
 
-config KSCAN_FT5336_INTERRUPT
+config INPUT_FT5336_INTERRUPT
 	default y
 
-endif # KSCAN
+endif # INPUT
 
 if NETWORKING
 
 config NET_L2_ETHERNET
 	default y
 
+if ETH_MCUX
+
 config ETH_MCUX_PHY_RESET
 	default y
+
+endif # ETH_MCUX
 
 endif # NETWORKING
 
 if LVGL
 
-config LV_Z_POINTER_KSCAN
-	default y
-
 config LV_Z_VDB_SIZE
 	default 16
 
-config LV_Z_DPI
+config LV_DPI_DEF
 	default 128
 
 choice LV_COLOR_DEPTH

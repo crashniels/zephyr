@@ -20,3 +20,5 @@ supported:
   - spi
   - netif:eth
   - backup_sram
+  - usb_device
+vendor: st

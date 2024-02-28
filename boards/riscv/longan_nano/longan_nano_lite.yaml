@@ -1,7 +1,7 @@
 identifier: longan_nano_lite
 name: Sipeed Longan Nano Lite
 type: mcu
-arch: riscv32
+arch: riscv
 toolchain:
   - zephyr
   - xtools
@@ -9,3 +9,6 @@ flash: 64
 ram: 20
 supported:
   - watchdog
+  - dma
+  - spi
+vendor: sipeed

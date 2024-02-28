@@ -2,13 +2,20 @@
 
 cmake_minimum_required(VERSION 3.20.0)
 
-enable_language(C CXX ASM)
-
 include(root)
 include(boards)
 include(arch)
 include(configuration_files)
+
+include(west)
+include(zephyr_module)
 include(kconfig)
+
+find_package(TargetTools)
+
+enable_language(C CXX ASM)
+
+include(${ZEPHYR_BASE}/cmake/target_toolchain_flags.cmake)
 
 # Parameters:
 #   SOURCES: list of source files, default main.c
@@ -33,7 +40,9 @@ if((NOT DEFINED ZEPHYR_BASE) AND (DEFINED ENV_ZEPHYR_BASE))
   set(ZEPHYR_BASE ${ENV_ZEPHYR_BASE} CACHE PATH "Zephyr base")
 endif()
 
-if(NOT SOURCES)
+find_package(Deprecated COMPONENTS SOURCES)
+
+if(NOT SOURCES AND EXISTS main.c)
   set(SOURCES main.c)
 endif()
 
@@ -87,36 +96,22 @@ target_link_libraries(testbinary PRIVATE
   ${EXTRA_LDFLAGS_AS_LIST}
   )
 
-if(COVERAGE)
-  target_compile_options(test_interface INTERFACE
-    -fno-default-inline
-    -fno-inline
-    -fprofile-arcs
-    -ftest-coverage
-    )
+if(CONFIG_COVERAGE)
+  target_compile_options(test_interface INTERFACE $<TARGET_PROPERTY:compiler,coverage>)
 
-  target_link_libraries(testbinary PRIVATE
-    -lgcov
-    )
+  target_link_libraries(testbinary PRIVATE $<TARGET_PROPERTY:linker,coverage>)
 endif()
 
 if(LIBS)
   message(FATAL_ERROR "This variable is not supported, see SOURCES instead")
 endif()
 
-if(CONFIG_ZTEST_NEW_API)
-  target_sources(testbinary PRIVATE
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_new.c
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_mock.c
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_rules.c
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_defaults.c
-      )
-else()
-  target_sources(testbinary PRIVATE
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest.c
-      ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_mock.c
-      )
-endif()
+target_sources(testbinary PRIVATE
+  ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest.c
+  ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_mock.c
+  ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_rules.c
+  ${ZEPHYR_BASE}/subsys/testsuite/ztest/src/ztest_defaults.c
+)
 
 target_compile_definitions(test_interface INTERFACE ZTEST_UNITTEST)
 

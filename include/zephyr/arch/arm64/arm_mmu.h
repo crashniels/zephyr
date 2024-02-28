@@ -44,6 +44,7 @@
  * attrs[6] : Execute Permissions unprivileged mode (UXN)
  * attrs[7] : Mirror RO/RW permissions to EL0
  * attrs[8] : Overwrite existing mapping if any
+ * attrs[9] : non-Global mapping (nG)
  *
  */
 #define MT_PERM_SHIFT		3U
@@ -52,6 +53,7 @@
 #define MT_U_EXECUTE_SHIFT	6U
 #define MT_RW_AP_SHIFT		7U
 #define MT_NO_OVERWRITE_SHIFT	8U
+#define MT_NON_GLOBAL_SHIFT	9U
 
 #define MT_RO			(0U << MT_PERM_SHIFT)
 #define MT_RW			(1U << MT_PERM_SHIFT)
@@ -70,6 +72,9 @@
 
 #define MT_NO_OVERWRITE		(1U << MT_NO_OVERWRITE_SHIFT)
 
+#define MT_G			(0U << MT_NON_GLOBAL_SHIFT)
+#define MT_NG			(1U << MT_NON_GLOBAL_SHIFT)
+
 #define MT_P_RW_U_RW		(MT_RW | MT_RW_AP_ELx | MT_P_EXECUTE_NEVER | MT_U_EXECUTE_NEVER)
 #define MT_P_RW_U_NA		(MT_RW | MT_RW_AP_EL_HIGHER  | MT_P_EXECUTE_NEVER | MT_U_EXECUTE_NEVER)
 #define MT_P_RO_U_RO		(MT_RO | MT_RW_AP_ELx | MT_P_EXECUTE_NEVER | MT_U_EXECUTE_NEVER)
@@ -83,6 +88,13 @@
 #else
 #define MT_DEFAULT_SECURE_STATE	MT_SECURE
 #endif
+
+/*
+ * ARM guarantees at least 8 ASID bits.
+ * We may have more available, but do not make use of them for the time being.
+ */
+#define VM_ASID_BITS 8
+#define TTBR_ASID_SHIFT 48
 
 /*
  * PTE descriptor can be Block descriptor or Table descriptor
@@ -175,6 +187,7 @@ struct arm_mmu_config {
 
 struct arm_mmu_ptables {
 	uint64_t *base_xlat_table;
+	uint64_t ttbr0;
 };
 
 /* Convenience macros to represent the ARMv8-A-specific
@@ -193,6 +206,45 @@ struct arm_mmu_ptables {
 
 #define MMU_REGION_FLAT_ENTRY(name, adr, sz, attrs) \
 	MMU_REGION_ENTRY(name, adr, adr, sz, attrs)
+
+/*
+ * @brief Auto generate mmu region entry for node_id
+ *
+ * Example usage:
+ *
+ * @code{.c}
+ *      DT_FOREACH_STATUS_OKAY_VARGS(nxp_imx_gpio,
+ *				  MMU_REGION_DT_FLAT_ENTRY,
+ *				 (MT_DEVICE_nGnRnE | MT_P_RW_U_NA | MT_NS))
+ * @endcode
+ *
+ * @note  Since devicetree_generated.h does not include
+ *        node_id##_P_reg_FOREACH_PROP_ELEM* definitions,
+ *        we can't automate dts node with multiple reg
+ *        entries.
+ */
+#define MMU_REGION_DT_FLAT_ENTRY(node_id, attrs)  \
+	MMU_REGION_FLAT_ENTRY(DT_NODE_FULL_NAME(node_id), \
+				  DT_REG_ADDR(node_id), \
+				  DT_REG_SIZE(node_id), \
+				  attrs),
+
+/*
+ * @brief Auto generate mmu region entry for status = "okay"
+ *        nodes compatible to a driver
+ *
+ * Example usage:
+ *
+ * @code{.c}
+ *      MMU_REGION_DT_COMPAT_FOREACH_FLAT_ENTRY(nxp_imx_gpio,
+ *				 (MT_DEVICE_nGnRnE | MT_P_RW_U_NA | MT_NS))
+ * @endcode
+ *
+ * @note  This is a wrapper of @ref MMU_REGION_DT_FLAT_ENTRY
+ */
+#define MMU_REGION_DT_COMPAT_FOREACH_FLAT_ENTRY(compat, attr) \
+	DT_FOREACH_STATUS_OKAY_VARGS(compat, \
+	MMU_REGION_DT_FLAT_ENTRY, attr)
 
 /* Kernel macros for memory attribution
  * (access permissions and cache-ability).

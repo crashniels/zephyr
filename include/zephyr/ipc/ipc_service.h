@@ -18,15 +18,26 @@ extern "C" {
 /**
  * @brief IPC
  * @defgroup ipc IPC
+ * @ingroup os_services
  * @{
  * @}
  */
+
 /**
  * @brief IPC Service API
  * @defgroup ipc_service_api IPC service APIs
  * @ingroup ipc
  * @{
+ */
+
+/**
+ * @cond INTERNAL_HIDDEN
  *
+ * These are for internal use only, so skip these in
+ * public documentation.
+ */
+
+/**
  * Some terminology:
  *
  * - INSTANCE: an instance is the external representation of a physical
@@ -122,6 +133,10 @@ extern "C" {
  *
  */
 
+/**
+ * @endcond
+ */
+
 /** @brief Event callback structure.
  *
  *  It is registered during endpoint registration.
@@ -206,7 +221,7 @@ int ipc_service_open_instance(const struct device *instance);
 
 /** @brief Close an instance
  *
- *  Function to be used to close an instance. All endpoints must be
+ *  Function to be used to close an instance. All bounded endpoints must be
  *  deregistered using ipc_service_deregister_endpoint before this
  *  is called.
  *
@@ -419,7 +434,7 @@ int ipc_service_send_nocopy(struct ipc_ept *ept, const void *data, size_t len);
  *  using the @ref ipc_service_release_rx_buffer function.
  *
  *  @param[in] ept Registered endpoint by @ref ipc_service_register_endpoint.
- *  @param[in] data Pointer to the RX buffer to release.
+ *  @param[in] data Pointer to the RX buffer to hold.
  *
  *  @retval -EIO when no backend is registered or release hook is missing from
  *		 backend.

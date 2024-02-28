@@ -28,7 +28,7 @@ description: |
     key1: key1 {
       gpios = <&gpio0 0 GPIO_ACTIVE_HIGH>;
     };
-    key1: key2 {
+    key2: key2 {
       gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
     };
     key3: key3 {
@@ -46,8 +46,8 @@ compatible: "zephyr,gpio-emul-sdl"
 include: base.yaml
 
 properties:
-    scancodes:
-      type: array
-      required: true
-      description: |
-        An array of SDL scancodes mapped to its GPIO index
+  scancodes:
+    type: array
+    required: true
+    description: |
+      An array of SDL scancodes mapped to its GPIO index

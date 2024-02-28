@@ -6,7 +6,6 @@
 
 /dts-v1/;
 #include <st/h7/stm32h745Xi_m7.dtsi>
-#include <st/h7/stm32h745zitx-pinctrl.dtsi>
 #include "nucleo_h745zi_q.dtsi"
 
 /*
@@ -45,6 +44,14 @@
 	};
 };
 
+&clk_lsi {
+	status = "okay";
+};
+
+&clk_hsi48 {
+	status = "okay";
+};
+
 &clk_hse {
 	hse-bypass;
 	clock-frequency = <DT_FREQ_M(8)>; /* STLink 8MHz clock */
@@ -55,7 +62,7 @@
 	div-m = <1>;
 	mul-n = <120>;
 	div-p = <2>;
-	div-q = <2>;
+	div-q = <8>;
 	div-r = <2>;
 	clocks = <&clk_hse>;
 	status = "okay";
@@ -74,6 +81,8 @@
 };
 
 &rtc {
+	clocks = <&rcc STM32_CLOCK_BUS_APB4 0x00010000>,
+		 <&rcc STM32_SRC_LSI RTC_SEL(2)>;
 	status = "okay";
 };
 

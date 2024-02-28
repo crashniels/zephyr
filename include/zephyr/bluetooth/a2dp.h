@@ -1,5 +1,5 @@
 /** @file
- * @brief Advance Audio Distribution Profile header.
+ * @brief Advanced Audio Distribution Profile header.
  */
 
 /*
@@ -9,6 +9,8 @@
  */
 #ifndef ZEPHYR_INCLUDE_BLUETOOTH_A2DP_H_
 #define ZEPHYR_INCLUDE_BLUETOOTH_A2DP_H_
+
+#include <stdint.h>
 
 #include <zephyr/bluetooth/avdtp.h>
 

@@ -31,7 +31,7 @@ LOG_MODULE_REGISTER(net_ppp, LOG_LEVEL);
 #include <zephyr/sys/crc.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/console/uart_mux.h>
-#include <zephyr/random/rand32.h>
+#include <zephyr/random/random.h>
 
 #include "../../subsys/net/ip/net_stats.h"
 #include "../../subsys/net/ip/net_private.h"
@@ -121,14 +121,34 @@ static void uart_callback(const struct device *dev,
 
 	switch (evt->type) {
 	case UART_TX_DONE:
-		LOG_DBG("UART_TX_DONE: sent %d bytes", evt->data.tx.len);
+		LOG_DBG("UART_TX_DONE: sent %zu bytes", evt->data.tx.len);
 		k_sem_give(&uarte_tx_finished);
 		break;
 
 	case UART_TX_ABORTED:
-		LOG_DBG("Tx aborted");
+	{
 		k_sem_give(&uarte_tx_finished);
+		if (CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT == 0) {
+			LOG_WRN("UART TX aborted.");
+			break;
+		}
+		struct uart_config uart_conf;
+
+		err = uart_config_get(dev, &uart_conf);
+		if (err) {
+			LOG_ERR("uart_config_get() err: %d", err);
+		} else if (uart_conf.baudrate / 10 * CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT
+			  / MSEC_PER_SEC > evt->data.tx.len * 2) {
+			/* The abort likely did not happen because of missing bandwidth. */
+			LOG_DBG("UART_TX_ABORTED");
+		} else {
+			LOG_WRN("UART TX aborted: Only %zu bytes were sent. You may want"
+				" to change either CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT"
+				" (%d ms) or the UART baud rate (%u).", evt->data.tx.len,
+				CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT, uart_conf.baudrate);
+		}
 		break;
+	}
 
 	case UART_RX_RDY:
 		len = evt->data.rx.len;
@@ -171,7 +191,7 @@ static void uart_callback(const struct device *dev,
 
 	case UART_RX_BUF_REQUEST:
 	{
-		LOG_DBG("UART_RX_BUF_REQUEST: buf %p", next_buf);
+		LOG_DBG("UART_RX_BUF_REQUEST: buf %p", (void *)next_buf);
 
 		if (next_buf) {
 			err = uart_rx_buf_rsp(dev, next_buf, sizeof(context->buf));
@@ -185,7 +205,7 @@ static void uart_callback(const struct device *dev,
 
 	case UART_RX_BUF_RELEASED:
 		next_buf = evt->data.rx_buf.buf;
-		LOG_DBG("UART_RX_BUF_RELEASED: buf %p", next_buf);
+		LOG_DBG("UART_RX_BUF_RELEASED: buf %p", (void *)next_buf);
 		break;
 
 	case UART_RX_DISABLED:
@@ -232,8 +252,9 @@ static int ppp_async_uart_rx_enable(struct ppp_driver_context *context)
 
 static void uart_recovery(struct k_work *work)
 {
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 	struct ppp_driver_context *ppp =
-		CONTAINER_OF(work, struct ppp_driver_context, uart_recovery_work);
+		CONTAINER_OF(dwork, struct ppp_driver_context, uart_recovery_work);
 	int ret;
 
 	ret = ring_buf_space_get(&ppp->rx_ringbuf);
@@ -242,7 +263,7 @@ static void uart_recovery(struct k_work *work)
 		if (ret) {
 			LOG_ERR("ppp_async_uart_rx_enable() failed, err %d", ret);
 		} else {
-			LOG_WRN("UART RX recovered");
+			LOG_DBG("UART RX recovered.");
 		}
 		uart_recovery_pending = false;
 	} else {
@@ -367,11 +388,13 @@ static int ppp_send_flush(struct ppp_driver_context *ppp, int off)
 	} else if (IS_ENABLED(CONFIG_NET_PPP_ASYNC_UART)) {
 #if defined(CONFIG_NET_PPP_ASYNC_UART)
 		int ret;
+		const int32_t timeout = CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT
+					? CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT * USEC_PER_MSEC
+					: SYS_FOREVER_US;
 
 		k_sem_take(&uarte_tx_finished, K_FOREVER);
 
-		ret = uart_tx(ppp->dev, buf, off,
-			      CONFIG_NET_PPP_ASYNC_UART_TX_TIMEOUT * USEC_PER_MSEC);
+		ret = uart_tx(ppp->dev, buf, off, timeout);
 		if (ret) {
 			LOG_ERR("uart_tx() failed, err %d", ret);
 			k_sem_give(&uarte_tx_finished);
@@ -609,7 +632,7 @@ static void ppp_process_msg(struct ppp_driver_context *ppp)
 static uint8_t *ppp_recv_cb(uint8_t *buf, size_t *off)
 {
 	struct ppp_driver_context *ppp =
-		CONTAINER_OF(buf, struct ppp_driver_context, buf);
+		CONTAINER_OF(buf, struct ppp_driver_context, buf[0]);
 	size_t i, len = *off;
 
 	for (i = 0; i < *off; i++) {
@@ -747,21 +770,7 @@ static int ppp_send(const struct device *dev, struct net_pkt *pkt)
 			protocol = htons(PPP_IP);
 		} else if (net_pkt_family(pkt) == AF_INET6) {
 			protocol = htons(PPP_IPV6);
-		} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
-			   net_pkt_family(pkt) == AF_PACKET) {
-			char type = (NET_IPV6_HDR(pkt)->vtc & 0xf0);
-
-			switch (type) {
-			case 0x60:
-				protocol = htons(PPP_IPV6);
-				break;
-			case 0x40:
-				protocol = htons(PPP_IP);
-				break;
-			default:
-				return -EPROTONOSUPPORT;
-			}
-		} else {
+		}  else {
 			return -EPROTONOSUPPORT;
 		}
 	}
@@ -954,14 +963,14 @@ use_random_mac:
 
 	memset(ppp->buf, 0, sizeof(ppp->buf));
 
-	/* If the interface autostart is disabled from Kconfig, then do not
-	 * start the interface automatically but only after manually started.
+	/* If we have a GSM modem with PPP support or interface autostart is disabled
+	 * from Kconfig, then do not start the interface automatically but only
+	 * after the modem is ready or when manually started.
 	 */
-	if (IS_ENABLED(CONFIG_PPP_NET_IF_NO_AUTO_START)) {
+	if (IS_ENABLED(CONFIG_MODEM_GSM_PPP) ||
+	    IS_ENABLED(CONFIG_PPP_NET_IF_NO_AUTO_START)) {
 		net_if_flag_set(iface, NET_IF_NO_AUTO_START);
 	}
-
-	net_if_carrier_off(iface);
 }
 
 #if defined(CONFIG_NET_STATISTICS_PPP)
@@ -1023,7 +1032,7 @@ static int ppp_start(const struct device *dev)
 		 * configuration is enabled, and use that. If none are enabled,
 		 * then use our own config.
 		 */
-#if IS_ENABLED(CONFIG_GSM_MUX)
+#if defined(CONFIG_GSM_MUX)
 		const struct device *mux;
 
 		mux = uart_mux_find(CONFIG_GSM_MUX_DLCI_PPP);
@@ -1040,7 +1049,7 @@ static int ppp_start(const struct device *dev)
 		/* dts chosen zephyr,ppp-uart case */
 		context->dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_ppp_uart));
 #endif
-		LOG_INF("Initializing PPP to use %s", context->dev->name);
+		LOG_DBG("Initializing PPP to use %s", context->dev->name);
 
 		if (!device_is_ready(context->dev)) {
 			LOG_ERR("Device %s is not ready", context->dev->name);
@@ -1060,8 +1069,7 @@ static int ppp_start(const struct device *dev)
 	}
 #endif /* !CONFIG_NET_TEST */
 
-	net_ppp_carrier_on(context->iface);
-
+	net_if_carrier_on(context->iface);
 	return 0;
 }
 
@@ -1069,7 +1077,10 @@ static int ppp_stop(const struct device *dev)
 {
 	struct ppp_driver_context *context = dev->data;
 
-	net_ppp_carrier_off(context->iface);
+	net_if_carrier_off(context->iface);
+#if defined(CONFIG_NET_PPP_ASYNC_UART)
+	uart_rx_disable(context->dev);
+#endif
 	context->modem_init_done = false;
 	return 0;
 }

@@ -99,7 +99,7 @@ static void bma280_thread_cb(const struct device *dev)
 	    drv_data->data_ready_handler != NULL &&
 	    err == 0) {
 		drv_data->data_ready_handler(dev,
-					     &drv_data->data_ready_trigger);
+					     drv_data->data_ready_trigger);
 	}
 
 	/* check for any motion */
@@ -109,7 +109,7 @@ static void bma280_thread_cb(const struct device *dev)
 	    drv_data->any_motion_handler != NULL &&
 	    err == 0) {
 		drv_data->any_motion_handler(dev,
-					     &drv_data->data_ready_trigger);
+					     drv_data->any_motion_trigger);
 
 		/* clear latched interrupt */
 		err = i2c_reg_update_byte_dt(&config->i2c,
@@ -127,8 +127,13 @@ static void bma280_thread_cb(const struct device *dev)
 }
 
 #ifdef CONFIG_BMA280_TRIGGER_OWN_THREAD
-static void bma280_thread(struct bma280_data *drv_data)
+static void bma280_thread(void *p1, void *p2, void *p3)
 {
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	struct bma280_data *drv_data = p1;
+
 	while (1) {
 		k_sem_take(&drv_data->gpio_sem, K_FOREVER);
 		bma280_thread_cb(drv_data->dev);
@@ -170,7 +175,7 @@ int bma280_trigger_set(const struct device *dev,
 		if (handler == NULL) {
 			return 0;
 		}
-		drv_data->data_ready_trigger = *trig;
+		drv_data->data_ready_trigger = trig;
 
 		/* enable data ready interrupt */
 		if (i2c_reg_update_byte_dt(&config->i2c,
@@ -193,7 +198,7 @@ int bma280_trigger_set(const struct device *dev,
 		if (handler == NULL) {
 			return 0;
 		}
-		drv_data->any_motion_trigger = *trig;
+		drv_data->any_motion_trigger = trig;
 
 		/* enable any-motion interrupt */
 		if (i2c_reg_update_byte_dt(&config->i2c,
@@ -225,7 +230,7 @@ int bma280_init_interrupt(const struct device *dev)
 	}
 
 	/* setup data ready gpio interrupt */
-	if (!device_is_ready(config->int1_gpio.port)) {
+	if (!gpio_is_ready_dt(&config->int1_gpio)) {
 		LOG_ERR("GPIO device not ready");
 		return -ENODEV;
 	}
@@ -281,7 +286,7 @@ int bma280_init_interrupt(const struct device *dev)
 
 	k_thread_create(&drv_data->thread, drv_data->thread_stack,
 			CONFIG_BMA280_THREAD_STACK_SIZE,
-			(k_thread_entry_t)bma280_thread, drv_data,
+			bma280_thread, drv_data,
 			NULL, NULL, K_PRIO_COOP(CONFIG_BMA280_THREAD_PRIORITY),
 			0, K_NO_WAIT);
 #elif defined(CONFIG_BMA280_TRIGGER_GLOBAL_THREAD)

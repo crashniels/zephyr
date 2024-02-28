@@ -16,6 +16,8 @@
 #include <zephyr/irq_nextlevel.h>
 #endif
 
+#include <soc.h>
+
 #define LOG_LEVEL CONFIG_SOC_LOG_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(soc);
@@ -216,11 +218,10 @@ static void rv32m1_setup_peripheral_clocks(void)
  *
  * @return 0
  */
-static int soc_rv32m1_init(const struct device *arg)
+static int soc_rv32m1_init(void)
 {
 	unsigned int key;
 
-	ARG_UNUSED(arg);
 
 	key = irq_lock();
 
