@@ -7,22 +7,20 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/init.h>
 
-#if !defined(CONFIG_SOC_SERIES_LPC11U6X)
+#if (!defined(CONFIG_SOC_SERIES_LPC11U6X) || !defined(CONFIG_SOC_SERIES_LPC11U3X))
 #include <fsl_clock.h>
 #endif
 
 #define OFFSET(mux) (((mux) & 0xFFF00000) >> 20)
-#define TYPE(mux) (((mux) & 0xC0000) >> 18)
+#define TYPE(mux)   (((mux) & 0xC0000) >> 18)
 
 #define IOCON_TYPE_D 0x0
 #define IOCON_TYPE_I 0x1
 #define IOCON_TYPE_A 0x2
 
-static volatile uint32_t *iocon =
-	(volatile uint32_t *)DT_REG_ADDR(DT_NODELABEL(iocon));
+static volatile uint32_t *iocon = (volatile uint32_t *)DT_REG_ADDR(DT_NODELABEL(iocon));
 
-int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
-			   uintptr_t reg)
+int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintptr_t reg)
 {
 	for (uint8_t i = 0; i < pin_cnt; i++) {
 		uint32_t pin_mux = pins[i];
@@ -49,7 +47,8 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt,
 	return 0;
 }
 
-#if defined(CONFIG_SOC_FAMILY_LPC) && !defined(CONFIG_SOC_SERIES_LPC11U6X)
+#if defined(CONFIG_SOC_FAMILY_LPC) &&                                                              \
+	(!defined(CONFIG_SOC_SERIES_LPC11U6X) || !defined(CONFIG_SOC_SERIES_LPC11U3X))
 /* LPC family (except 11u6x) needs iocon clock to be enabled */
 
 static int pinctrl_clock_init(void)

@@ -9,13 +9,13 @@ include: [clock-controller.yaml, pinctrl-device.yaml, base.yaml]
 
 properties:
   reg:
-    required: true
+    required: false
 
   pinctrl-0:
-    required: true
+    required: false
 
   pinctrl-names:
-    required: true
+    required: false
 
   "#clock-cells":
     const: 1
