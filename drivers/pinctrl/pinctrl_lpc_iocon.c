@@ -7,8 +7,8 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/init.h>
 
-#if (!defined(CONFIG_SOC_SERIES_LPC11U6X) || !defined(CONFIG_SOC_SERIES_LPC11U3X))
-#include <fsl_clock.h>
+#if !defined(CONFIG_SOC_SERIES_LPC11U6X)
+// #include <fsl_clock.h>
 #endif
 
 #define OFFSET(mux) (((mux) & 0xFFF00000) >> 20)
@@ -47,17 +47,16 @@ int pinctrl_configure_pins(const pinctrl_soc_pin_t *pins, uint8_t pin_cnt, uintp
 	return 0;
 }
 
-#if defined(CONFIG_SOC_FAMILY_LPC) &&                                                              \
-	(!defined(CONFIG_SOC_SERIES_LPC11U6X) || !defined(CONFIG_SOC_SERIES_LPC11U3X))
+#if defined(CONFIG_SOC_FAMILY_LPC) && !defined(CONFIG_SOC_SERIES_LPC11U6X)
 /* LPC family (except 11u6x) needs iocon clock to be enabled */
 
-static int pinctrl_clock_init(void)
-{
-	/* Enable IOCon clock */
-	CLOCK_EnableClock(kCLOCK_Iocon);
-	return 0;
-}
+// static int pinctrl_clock_init(void)
+// {
+// 	/* Enable IOCon clock */
+// 	CLOCK_EnableClock(kCLOCK_Iocon);
+// 	return 0;
+// }
 
-SYS_INIT(pinctrl_clock_init, PRE_KERNEL_1, 0);
+// SYS_INIT(pinctrl_clock_init, PRE_KERNEL_1, 0);
 
 #endif /* CONFIG_SOC_FAMILY_LPC  && !CONFIG_SOC_SERIES_LPC11U6X */
