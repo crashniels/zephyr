@@ -22,13 +22,22 @@
 	sram0:memory@10000000 {
 		compatible = "mmio-sram";
 	};
+
 	
-	// sram1:memory@20000000 {
-	// 	compatible = "zephyr,memory-region", "mmio-sram";
-	// 	reg = <0x20000000 0x800>;
-	// 	zephyr,memory-region = "SRAM1";
-	// };
+	sram1:memory@20000000 {
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x20000000 0x800>;
+		zephyr,memory-region = "SRAM1";
+	};
 	
+	usb_sram: memory@20004000 {
+		/* Connected to USB bus*/
+		compatible = "zephyr,memory-region", "mmio-sram";
+		reg = <0x20004000 0x800>;
+		zephyr,memory-region = "USB_SRAM";
+		zephyr,memory-attr = <( DT_MEM_ARM(ATTR_MPU_RAM) )>;
+	};
+
 	soc {
 		flash0:flash@0 {
 			compatible = "soc-nv-flash";
@@ -66,37 +75,37 @@
 				reg = <0x60 0x7C>;
 			};
 		};
-				
+		
 		/* GPIO0_0 to GPIO0_23 */
 		gpio0: gpio@0 {
 			compatible = "nxp,lpc11u6x-gpio";
 			reg = <0xa0000000 0x8000>, <0x40048000 0x400>;
 			interrupts = <0 2>, <1 2>, <2 2>, <3 2>, \
-				     <4 2>, <5 2>, <6 2>, <7 2>;
-
+			<4 2>, <5 2>, <6 2>, <7 2>;
+			
 			gpio-controller;
 			#gpio-cells = <2>;
 			ngpios = <24>;
-
+			
 			clocks = <&syscon LPC11U6X_CLOCK_GPIO>;
 			iocon = <&pio0>;
-
+			
 			status = "disabled";
 		};
-
+		
 		/* GPIO1_0 to GPIO1_31 */
 		gpio1: gpio@1 {
 			compatible = "nxp,lpc11u6x-gpio";
 			reg = <0xa0000000 0x8000>, <0x40048000 0x400>;
 			interrupts = <0 2>, <1 2>, <2 2>, <3 2>, \
-				     <4 2>, <5 2>, <6 2>, <7 2>;
-
+			<4 2>, <5 2>, <6 2>, <7 2>;
+			
 			gpio-controller;
 			#gpio-cells = <2>;
-
+			
 			clocks = <&syscon LPC11U6X_CLOCK_GPIO>;
 			iocon = <&pio1>;
-
+			
 			status = "disabled";
 		};
 		
@@ -122,6 +131,14 @@
 			reg = <0x40000000 0x40>;
 			clocks = <&syscon LPC11U6X_CLOCK_I2C0>;
 			interrupts = <15 0>;
+			status = "disabled";
+		};
+		
+		usbhs: usbhs@40080000 {
+			compatible = "nxp,lpcip3511";
+			reg = <0x40080000 0x4000>;
+			interrupts = <22 0>;
+			num-bidir-endpoints = <6>;
 			status = "disabled";
 		};
 	};
